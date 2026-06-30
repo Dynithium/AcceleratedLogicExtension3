@@ -823,3 +823,11 @@ body {
   display: inline-block;
 }
 
+/* Stop state for generator pause */
+.send-button.stop-state {
+  background-color: #ef4444 !important;
+}
+.send-button.stop-state:hover {
+  background-color: #f87171 !important;
+}
+

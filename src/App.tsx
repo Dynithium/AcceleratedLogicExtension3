@@ -11,6 +11,7 @@ import {
   Copy, 
   Paperclip, 
   Send, 
+  Square,
   Plus, 
   X, 
   Eye, 
@@ -1428,6 +1429,9 @@ export default function App() {
     }
   ]);
   const [simLoading, setSimLoading] = useState<boolean>(false);
+  const [simGenerating, setSimGenerating] = useState<boolean>(false);
+  const simAbortControllerRef = useRef<AbortController | null>(null);
+  const simTimeoutRef = useRef<any>(null);
   
   const simChatEndRef = useRef<HTMLDivElement>(null);
 
@@ -1489,6 +1493,18 @@ export default function App() {
     }, 800);
   };
 
+  // Stop message generation in simulator
+  const handleSimStop = () => {
+    if (simAbortControllerRef.current) {
+      simAbortControllerRef.current.abort();
+    }
+    if (simTimeoutRef.current) {
+      clearTimeout(simTimeoutRef.current);
+    }
+    setSimGenerating(false);
+    setSimLoading(false);
+  };
+
   // Send message in simulator
   const handleSimSend = async () => {
     if (!simInput.trim() && !simAttachment) return;
@@ -1512,6 +1528,10 @@ export default function App() {
 
     if (simApiKey) {
       setSimLoading(true);
+      setSimGenerating(true);
+      
+      const controller = new AbortController();
+      simAbortControllerRef.current = controller;
 
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModelId}:streamGenerateContent?key=${simApiKey}`;
@@ -1570,8 +1590,14 @@ export default function App() {
           const response = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
             body: JSON.stringify({
               contents: localHistory,
+              systemInstruction: {
+                parts: [{
+                  text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, or 'get_page_screenshot' to get a visual screenshot.\n\nCRITICAL RULES:\n- Never output raw base64 data, gibberish strings, or repeating binary characters (like ryandsqt/W2W2W2... or other base64 fragments).\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally to answer the user's specific query.\n- Keep explanations conversational, elegant, and markdown-formatted."
+                }]
+              },
               tools: [{
                 functionDeclarations: [
                   {
@@ -1700,7 +1726,7 @@ export default function App() {
               // screenshot
               toolOutput = {
                 success: true,
-                screenshot_url: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+                screenshot_url: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
               };
             }
 
@@ -1726,7 +1752,7 @@ export default function App() {
               responseParts.push({
                 inlineData: {
                   mimeType: "image/jpeg",
-                  data: "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+                  data: "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
                 }
               });
             }
@@ -1748,20 +1774,36 @@ export default function App() {
           }
         }
 
+        setSimGenerating(false);
+
       } catch (e: any) {
         setSimLoading(false);
-        setSimMessages((prev) => [
-          ...prev,
-          {
-            id: Date.now() + 1,
-            role: "assistant",
-            text: `❌ **API Connection Error:** ${e.message || "Could not query Gemini API."}\n\nMake sure your pasted API Key is valid and that you have unrestricted network access to \`generativelanguage.googleapis.com\`.`
-          }
-        ]);
+        setSimGenerating(false);
+        if (e.name === "AbortError") {
+          setSimMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now() + 1,
+              role: "assistant",
+              text: "⚠️ *Generation stopped by user.*"
+            }
+          ]);
+        } else {
+          setSimMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now() + 1,
+              role: "assistant",
+              text: `❌ **API Connection Error:** ${e.message || "Could not query Gemini API."}\n\nMake sure your pasted API Key is valid and that you have unrestricted network access to \`generativelanguage.googleapis.com\`.`
+            }
+          ]);
+        }
       }
     } else {
       setSimLoading(true);
-      setTimeout(() => {
+      setSimGenerating(true);
+      simTimeoutRef.current = setTimeout(() => {
+        setSimGenerating(false);
         let mockResponse = "";
         if (currentAttach && currentAttach.domContext) {
           mockResponse = `<thinking>Analyzing current webpage context and DOM structure...
@@ -2447,12 +2489,23 @@ To install this tool directly into your Chrome browser, check out the **Installa
                       className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-100 flex-1 outline-none focus:border-blue-500"
                     />
 
-                    <button
-                      onClick={handleSimSend}
-                      className="p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition shrink-0 cursor-pointer flex items-center justify-center"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                    </button>
+                    {simGenerating ? (
+                      <button
+                        onClick={handleSimStop}
+                        className="p-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg transition shrink-0 cursor-pointer flex items-center justify-center animate-pulse"
+                        title="Stop generation"
+                      >
+                        <Square className="w-3.5 h-3.5 fill-white" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleSimSend}
+                        className="p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition shrink-0 cursor-pointer flex items-center justify-center"
+                        title="Send message"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                      </button>
+                    )}
 
                   </div>
                 </footer>

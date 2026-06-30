@@ -35,6 +35,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let modelId = "gemini-2.5-flash";
   let activeAttachment = null; // { name, size, mimeType, base64, domContext }
   let chatHistory = []; // list of { role: 'user'|'model', parts: [{text}, {inlineData}] }
+  let isGenerating = false;
+  let currentAbortController = null;
 
   // 1. Initial Load & Hydrate Settings
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
@@ -215,7 +217,7 @@ document.addEventListener("DOMContentLoaded", () => {
             // If capturing fails due to restricted page (e.g. chrome:// tabs)
             showToast("Failed to capture screen (restricted tab). Using DOM context only.");
             // We can use a transparent pixel fallback so it still works
-            screenshotUrl = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+            screenshotUrl = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=";
           }
 
           setAttachment({
@@ -269,7 +271,37 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  function setStopState(active) {
+    if (active) {
+      isGenerating = true;
+      btnSend.classList.add("stop-state");
+      btnSend.title = "Stop generation";
+      btnSend.innerHTML = `
+        <svg viewBox="0 0 24 24" class="send-icon">
+          <rect x="6" y="6" width="12" height="12" rx="1.5" fill="#ffffff" />
+        </svg>
+      `;
+    } else {
+      isGenerating = false;
+      currentAbortController = null;
+      btnSend.classList.remove("stop-state");
+      btnSend.title = "Send message";
+      btnSend.innerHTML = `
+        <svg viewBox="0 0 24 24" class="send-icon">
+          <path d="M2,21L23,12L2,3V10L17,12L2,14V21Z" />
+        </svg>
+      `;
+    }
+  }
+
   async function sendMessage() {
+    if (isGenerating) {
+      if (currentAbortController) {
+        currentAbortController.abort();
+      }
+      return;
+    }
+
     const prompt = promptInput.value.trim();
     if (!prompt && !activeAttachment) return;
 
@@ -383,6 +415,9 @@ document.addEventListener("DOMContentLoaded", () => {
     scrollToBottom();
 
     try {
+      setStopState(true);
+      currentAbortController = new AbortController();
+
       // Determine correct model name
       let activeModel = modelId;
       if (activeModel === "custom") {
@@ -403,6 +438,11 @@ document.addEventListener("DOMContentLoaded", () => {
         
         const payload = {
           contents: chatHistory,
+          systemInstruction: {
+            parts: [{
+              text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, or 'get_page_screenshot' to get a visual screenshot.\n\nCRITICAL RULES:\n- Never output raw base64 data, gibberish strings, or repeating binary characters (like ryandsqt/W2W2W2... or other base64 fragments).\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally to answer the user's specific query.\n- Keep explanations conversational, elegant, and markdown-formatted."
+            }]
+          },
           tools: [{
             functionDeclarations: [
               {
@@ -430,6 +470,7 @@ document.addEventListener("DOMContentLoaded", () => {
           headers: {
             "Content-Type": "application/json"
           },
+          signal: currentAbortController.signal,
           body: JSON.stringify(payload)
         });
 
@@ -569,10 +610,12 @@ document.addEventListener("DOMContentLoaded", () => {
           ];
 
           if (activeFunctionCall.name === "get_page_screenshot" && toolResult.screenshot_url) {
+            const mimeMatch = toolResult.screenshot_url.match(/data:(image\/[a-zA-Z+]+);base64,/);
+            const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
             const base64Data = toolResult.screenshot_url.split(",")[1];
             responseParts.push({
               inlineData: {
-                mimeType: "image/jpeg",
+                mimeType: mimeType,
                 data: base64Data
               }
             });
@@ -617,15 +660,20 @@ document.addEventListener("DOMContentLoaded", () => {
       
       const errorDiv = document.createElement("div");
       errorDiv.className = "bubble-text";
-      errorDiv.style.color = "#f87171";
-      errorDiv.textContent = `Error: ${err.message || "Failed to contact Gemini API."}`;
+      if (err.name === "AbortError") {
+        errorDiv.style.color = "#fbbf24"; // warning amber
+        errorDiv.textContent = "Generation stopped by user.";
+      } else {
+        errorDiv.style.color = "#f87171"; // error red
+        errorDiv.textContent = `Error: ${err.message || "Failed to contact Gemini API."}`;
+        // Remove last user message from history so they can retry it easily
+        chatHistory.pop();
+      }
       assistantBubble.appendChild(errorDiv);
-
-      // Remove last user message from history so they can retry it easily
-      chatHistory.pop();
+    } finally {
+      setStopState(false);
+      scrollToBottom();
     }
-
-    scrollToBottom();
   }
 
   // Pure JavaScript Client-Side Markdown and LaTeX Parser
@@ -829,7 +877,7 @@ document.addEventListener("DOMContentLoaded", () => {
         } else if (name === "get_page_screenshot") {
           resolve({
             success: true,
-            screenshot_url: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+            screenshot_url: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
           });
         } else {
           resolve({ error: "Unknown tool" });
@@ -876,7 +924,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!screenshotUrl) {
               resolve({
                 success: true,
-                screenshot_url: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+                screenshot_url: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
                 message: "Failed to capture visual screenshot (restricted system tab). Fallback active."
               });
             } else {
