@@ -1726,6 +1726,7 @@ export default function App() {
           const decoder = new TextDecoder("utf-8");
           let accumulatedText = "";
           let buffer = "";
+          let inThinkingBlock = false;
 
           while (true) {
             const { value, done } = await reader.read();
@@ -1766,7 +1767,16 @@ export default function App() {
                   if (parts) {
                     for (const part of parts) {
                       if (part.text) {
-                        accumulatedText += part.text;
+                        const isThought = !!part.thought;
+                        if (isThought && !inThinkingBlock) {
+                          accumulatedText += "<thinking>" + part.text;
+                          inThinkingBlock = true;
+                        } else if (!isThought && inThinkingBlock) {
+                          accumulatedText += "</thinking>" + part.text;
+                          inThinkingBlock = false;
+                        } else {
+                          accumulatedText += part.text;
+                        }
                         setSimMessages((prev) =>
                           prev.map((msg) =>
                             msg.id === turnMsgId ? { ...msg, text: accumulatedText } : msg
@@ -1787,6 +1797,16 @@ export default function App() {
               }
             }
             buffer = buffer.substring(b);
+          }
+
+          if (inThinkingBlock) {
+            accumulatedText += "</thinking>";
+            inThinkingBlock = false;
+            setSimMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === turnMsgId ? { ...msg, text: accumulatedText } : msg
+              )
+            );
           }
 
           if (activeFunctionCall) {

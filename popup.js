@@ -704,6 +704,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const decoder = new TextDecoder("utf-8");
         let accumulatedText = "";
         let buffer = "";
+        let inThinkingBlock = false;
 
         while (true) {
           const { value, done } = await reader.read();
@@ -759,7 +760,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (parts) {
                   for (const part of parts) {
                     if (part.text) {
-                      accumulatedText += part.text;
+                      const isThought = !!part.thought;
+                      if (isThought && !inThinkingBlock) {
+                        accumulatedText += "<thinking>" + part.text;
+                        inThinkingBlock = true;
+                      } else if (!isThought && inThinkingBlock) {
+                        accumulatedText += "</thinking>" + part.text;
+                        inThinkingBlock = false;
+                      } else {
+                        accumulatedText += part.text;
+                      }
                       updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
                       scrollToBottom();
                     }
@@ -777,6 +787,12 @@ document.addEventListener("DOMContentLoaded", () => {
             }
           }
           buffer = buffer.substring(b);
+        }
+
+        if (inThinkingBlock) {
+          accumulatedText += "</thinking>";
+          inThinkingBlock = false;
+          updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
         }
 
         if (activeFunctionCall) {
