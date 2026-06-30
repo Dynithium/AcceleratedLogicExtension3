@@ -335,6 +335,48 @@ body {
   background-color: #1e293b;
 }
 
+/* Bubble Viewport Screenshot Container */
+.bubble-screenshot-container {
+  margin: 10px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #334155;
+  background-color: rgba(0, 0, 0, 0.25);
+  max-height: 150px;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.bubble-screenshot-container:hover {
+  border-color: #3b82f6;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+}
+
+.bubble-screenshot-image {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: cover;
+  max-height: 150px;
+  transition: max-height 0.2s ease-in-out;
+}
+
+.bubble-screenshot-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background-color: rgba(15, 23, 42, 0.85);
+  color: #f1f5f9;
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 4px;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  letter-spacing: 0.02em;
+}
+
 .bubble-text {
   white-space: pre-wrap;
 }

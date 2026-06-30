@@ -166,7 +166,30 @@ document.addEventListener("DOMContentLoaded", () => {
   function saveChatsToStorage() {
     const activeChat = chats.find(c => c.id === activeChatId);
     if (activeChat) {
-      activeChat.history = chatHistory;
+      // Clean and sanitize the history to remove any massive base64 image strings
+      // This protects chrome.storage.local from hitting the quota limit and keeps startup load times instant.
+      const sanitizedHistory = chatHistory.map(msg => {
+        const cleanParts = msg.parts.map(part => {
+          if (part.inlineData && part.inlineData.data && part.inlineData.data.length > 1000) {
+            return {
+              inlineData: {
+                mimeType: part.inlineData.mimeType,
+                data: "OMITTED_TO_PREVENT_STORAGE_BLOAT"
+              }
+            };
+          }
+          return part;
+        });
+        return {
+          role: msg.role,
+          parts: cleanParts
+        };
+      });
+
+      // Synchronize back to the current session variable to avoid memory leaks/accumulated latency
+      chatHistory = sanitizedHistory;
+      activeChat.history = sanitizedHistory;
+
       if (activeChat.title === "New Chat" && chatHistory.length > 0) {
         const firstUser = chatHistory.find(m => m.role === 'user');
         if (firstUser && firstUser.parts && firstUser.parts[0] && firstUser.parts[0].text) {
@@ -613,8 +636,25 @@ document.addEventListener("DOMContentLoaded", () => {
         // Call Gemini API directly with streamGenerateContent and tools enabled
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:streamGenerateContent?key=${apiKey}`;
         
+        // Optimize chat history: strip massive base64 inlineData from all past turns to prevent token bloat and extreme latency
+        const cleanContents = chatHistory.map((msg, index) => {
+          const isPastTurn = index < chatHistory.length - 1;
+          const cleanParts = msg.parts.map(part => {
+            if (part.inlineData) {
+              if (isPastTurn) {
+                return { text: `[Attachment (${part.inlineData.mimeType}) analyzed in previous turn]` };
+              }
+            }
+            return part;
+          });
+          return {
+            role: msg.role,
+            parts: cleanParts
+          };
+        });
+
         const payload = {
-          contents: chatHistory,
+          contents: cleanContents,
           systemInstruction: {
             parts: [{
               text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, or 'get_page_screenshot' to get a visual screenshot.\n\nCRITICAL RULES:\n- Never output raw base64 data, gibberish strings, or repeating binary characters (like ryandsqt/W2W2W2... or other base64 fragments).\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally to answer the user's specific query.\n- Keep explanations conversational, elegant, and markdown-formatted."
@@ -777,11 +817,21 @@ document.addEventListener("DOMContentLoaded", () => {
           scrollToBottom();
 
           // 3. Add functionResponse to chat history (with image attachment if it's get_page_screenshot)
+          const cleanToolResult = { ...toolResult };
+          if (cleanToolResult.screenshot_url) {
+            delete cleanToolResult.screenshot_url; // Remove the massive base64 from the textual tool response
+          }
+
           const responseParts = [
             {
               functionResponse: {
                 name: activeFunctionCall.name,
-                response: toolResult
+                response: {
+                  ...cleanToolResult,
+                  message: activeFunctionCall.name === "get_page_screenshot" 
+                    ? "Screenshot captured successfully and attached as an image part. Please analyze the image to answer."
+                    : undefined
+                }
               }
             }
           ];
@@ -790,6 +840,38 @@ document.addEventListener("DOMContentLoaded", () => {
             const mimeMatch = toolResult.screenshot_url.match(/data:(image\/[a-zA-Z+]+);base64,/);
             const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
             const base64Data = toolResult.screenshot_url.split(",")[1];
+            
+            // Create a gorgeous visual thumbnail in the assistant bubble
+            const imgContainer = document.createElement("div");
+            imgContainer.className = "bubble-screenshot-container";
+            
+            const img = document.createElement("img");
+            img.src = toolResult.screenshot_url;
+            img.className = "bubble-screenshot-image";
+            
+            const badge = document.createElement("div");
+            badge.className = "bubble-screenshot-badge";
+            badge.textContent = "Captured Viewport 📷 (Click to Expand)";
+            
+            imgContainer.appendChild(img);
+            imgContainer.appendChild(badge);
+            
+            // Interactive click-to-expand toggling
+            imgContainer.addEventListener("click", () => {
+              if (imgContainer.style.maxHeight === "none") {
+                imgContainer.style.maxHeight = "150px";
+                img.style.maxHeight = "150px";
+                badge.textContent = "Captured Viewport 📷 (Click to Expand)";
+              } else {
+                imgContainer.style.maxHeight = "none";
+                img.style.maxHeight = "none";
+                badge.textContent = "Click to Collapse ✕";
+              }
+            });
+
+            currentAssistantBubble.appendChild(imgContainer);
+            scrollToBottom();
+
             responseParts.push({
               inlineData: {
                 mimeType: mimeType,

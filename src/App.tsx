@@ -1655,12 +1655,29 @@ export default function App() {
           hasMoreTurns = false;
           let activeFunctionCall: any = null;
 
+          // Optimize history: strip massive base64 inlineData from all past turns to prevent token bloat
+          const optimizedHistory = localHistory.map((msg, idx) => {
+            const isPastTurn = idx < localHistory.length - 1;
+            const cleanParts = msg.parts.map((part: any) => {
+              if (part.inlineData) {
+                if (isPastTurn) {
+                  return { text: `[Attachment (${part.inlineData.mimeType}) analyzed in previous turn]` };
+                }
+              }
+              return part;
+            });
+            return {
+              role: msg.role,
+              parts: cleanParts
+            };
+          });
+
           const response = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             signal: controller.signal,
             body: JSON.stringify({
-              contents: localHistory,
+              contents: optimizedHistory,
               systemInstruction: {
                 parts: [{
                   text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, or 'get_page_screenshot' to get a visual screenshot.\n\nCRITICAL RULES:\n- Never output raw base64 data, gibberish strings, or repeating binary characters (like ryandsqt/W2W2W2... or other base64 fragments).\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally to answer the user's specific query.\n- Keep explanations conversational, elegant, and markdown-formatted."
@@ -1794,7 +1811,9 @@ export default function App() {
               // screenshot
               toolOutput = {
                 success: true,
-                screenshot_url: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
+                width: 1280,
+                height: 720,
+                message: "Screenshot captured successfully and attached as an image part. Please analyze the image visually to answer."
               };
             }
 
