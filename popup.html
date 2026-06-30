@@ -13,10 +13,26 @@
         <span class="sparkle-icon">✨</span>
         <h1 class="title">Gemini Companion</h1>
       </div>
-      <button id="btn-settings" class="icon-button" title="Configure Settings">
-        ⚙️
-      </button>
+      <div class="header-actions">
+        <button id="btn-chats" class="icon-button" title="Chats History">
+          💬
+        </button>
+        <button id="btn-settings" class="icon-button" title="Configure Settings">
+          ⚙️
+        </button>
+      </div>
     </header>
+
+    <!-- Chats Pane (Collapsible) -->
+    <div id="chats-pane" class="chats-pane collapsed">
+      <div class="chats-header">
+        <h3>My Chats</h3>
+        <button id="btn-new-chat" class="primary-button compact-btn">＋ New Chat</button>
+      </div>
+      <div class="chats-body" id="chats-list">
+        <!-- Dynmically loaded chats list -->
+      </div>
+    </div>
 
     <!-- Settings Pane (Collapsible) -->
     <div id="settings-pane" class="settings-pane collapsed">

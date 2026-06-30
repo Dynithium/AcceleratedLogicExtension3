@@ -30,17 +30,25 @@ document.addEventListener("DOMContentLoaded", () => {
   const promptInput = document.getElementById("prompt-input");
   const btnSend = document.getElementById("btn-send");
 
+  // Chats Pane DOM Elements
+  const btnChats = document.getElementById("btn-chats");
+  const chatsPane = document.getElementById("chats-pane");
+  const btnNewChat = document.getElementById("btn-new-chat");
+  const chatsList = document.getElementById("chats-list");
+
   // Extension State
   let apiKey = "";
   let modelId = "gemini-2.5-flash";
   let activeAttachment = null; // { name, size, mimeType, base64, domContext }
+  let chats = []; // list of { id, title, history }
+  let activeChatId = null;
   let chatHistory = []; // list of { role: 'user'|'model', parts: [{text}, {inlineData}] }
   let isGenerating = false;
   let currentAbortController = null;
 
   // 1. Initial Load & Hydrate Settings
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get(["apiKey", "modelId", "customModelId", "chatHistory"], (result) => {
+    chrome.storage.local.get(["apiKey", "modelId", "customModelId", "chats", "activeChatId", "chatHistory"], (result) => {
       if (result.apiKey) {
         apiKey = result.apiKey;
         inputApiKey.value = apiKey;
@@ -60,15 +68,62 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
-      if (result.chatHistory && result.chatHistory.length > 0) {
-        chatHistory = result.chatHistory;
+      // Multiple Chats Integration
+      if (result.chats && result.chats.length > 0) {
+        chats = result.chats;
+        activeChatId = result.activeChatId || chats[0].id;
+      } else if (result.chatHistory && result.chatHistory.length > 0) {
+        const firstUser = result.chatHistory.find(m => m.role === 'user');
+        let initialTitle = "Migrated Chat";
+        if (firstUser && firstUser.parts && firstUser.parts[0] && firstUser.parts[0].text) {
+          initialTitle = firstUser.parts[0].text.substring(0, 25);
+        }
+        const migrated = {
+          id: "chat-migrated",
+          title: initialTitle || "Migrated Chat",
+          history: result.chatHistory
+        };
+        chats = [migrated];
+        activeChatId = migrated.id;
+        chrome.storage.local.set({ chats: chats, activeChatId: activeChatId });
+      } else {
+        const initial = {
+          id: "chat-" + Date.now(),
+          title: "New Chat",
+          history: []
+        };
+        chats = [initial];
+        activeChatId = initial.id;
+        chrome.storage.local.set({ chats: chats, activeChatId: activeChatId });
+      }
+
+      const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
+      if (activeChat) {
+        activeChatId = activeChat.id;
+        chatHistory = activeChat.history || [];
+      }
+
+      renderChatsList();
+
+      if (chatHistory.length > 0) {
         welcomeScreen.style.display = "none";
         renderHistory();
+      } else {
+        welcomeScreen.style.display = "flex";
       }
     });
   } else {
-    // Fallback for development/testing outside of extension container
     console.log("Not running inside Chrome Extension context. Storage simulation active.");
+    // Simulated load
+    const initial = {
+      id: "sim-chat-1",
+      title: "New Chat",
+      history: []
+    };
+    chats = [initial];
+    activeChatId = initial.id;
+    chatHistory = [];
+    renderChatsList();
   }
 
   // Auto-resize prompt text area
@@ -80,7 +135,129 @@ document.addEventListener("DOMContentLoaded", () => {
   // Toggle settings pane visibility
   btnSettings.addEventListener("click", () => {
     settingsPane.classList.toggle("collapsed");
+    chatsPane.classList.add("collapsed"); // Close chats pane if open
   });
+
+  // Toggle chats pane visibility
+  btnChats.addEventListener("click", () => {
+    chatsPane.classList.toggle("collapsed");
+    settingsPane.classList.add("collapsed"); // Close settings pane if open
+  });
+
+  // Create new chat
+  btnNewChat.addEventListener("click", () => {
+    const newChat = {
+      id: "chat-" + Date.now(),
+      title: "New Chat",
+      history: []
+    };
+    chats.unshift(newChat);
+    activeChatId = newChat.id;
+    chatHistory = [];
+
+    chatsPane.classList.add("collapsed");
+    chatLog.innerHTML = "";
+    welcomeScreen.style.display = "flex";
+
+    saveChatsToStorage();
+    showToast("New chat created!");
+  });
+
+  function saveChatsToStorage() {
+    const activeChat = chats.find(c => c.id === activeChatId);
+    if (activeChat) {
+      activeChat.history = chatHistory;
+      if (activeChat.title === "New Chat" && chatHistory.length > 0) {
+        const firstUser = chatHistory.find(m => m.role === 'user');
+        if (firstUser && firstUser.parts && firstUser.parts[0] && firstUser.parts[0].text) {
+          let text = firstUser.parts[0].text.trim();
+          if (text.includes("DOM innerText Context")) {
+            const index = text.indexOf("User Prompt:");
+            if (index !== -1) {
+              text = text.substring(index + 12).trim();
+            }
+          }
+          activeChat.title = text.substring(0, 25) || "New Chat";
+        }
+      }
+    }
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ chats: chats, activeChatId: activeChatId });
+    }
+    renderChatsList();
+  }
+
+  function renderChatsList() {
+    chatsList.innerHTML = "";
+    chats.forEach(chat => {
+      const item = document.createElement("div");
+      item.className = `chat-item ${chat.id === activeChatId ? 'active' : ''}`;
+
+      const info = document.createElement("div");
+      info.className = "chat-item-info";
+
+      const icon = document.createElement("span");
+      icon.className = "chat-item-icon";
+      icon.textContent = "💬";
+
+      const title = document.createElement("span");
+      title.className = "chat-item-title";
+      title.textContent = chat.title || "New Chat";
+
+      info.appendChild(icon);
+      info.appendChild(title);
+      item.appendChild(info);
+
+      // Delete button
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "chat-item-delete";
+      deleteBtn.textContent = "🗑️";
+      deleteBtn.title = "Delete Chat";
+
+      deleteBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (chats.length <= 1) {
+          showToast("Cannot delete the last chat session!");
+          return;
+        }
+
+        chats = chats.filter(c => c.id !== chat.id);
+        if (activeChatId === chat.id) {
+          activeChatId = chats[0].id;
+          chatHistory = chats[0].history || [];
+          chatLog.innerHTML = "";
+          if (chatHistory.length > 0) {
+            welcomeScreen.style.display = "none";
+            renderHistory();
+          } else {
+            welcomeScreen.style.display = "flex";
+          }
+        }
+        saveChatsToStorage();
+      });
+
+      item.appendChild(deleteBtn);
+
+      // Click to load chat
+      item.addEventListener("click", () => {
+        if (activeChatId === chat.id) return;
+        activeChatId = chat.id;
+        chatHistory = chat.history || [];
+
+        chatsPane.classList.add("collapsed");
+        chatLog.innerHTML = "";
+        if (chatHistory.length > 0) {
+          welcomeScreen.style.display = "none";
+          renderHistory();
+        } else {
+          welcomeScreen.style.display = "flex";
+        }
+        saveChatsToStorage();
+      });
+
+      chatsList.appendChild(item);
+    });
+  }
 
   // Toggle API Key visibility
   btnToggleKeyVisibility.addEventListener("click", () => {
@@ -646,9 +823,7 @@ document.addEventListener("DOMContentLoaded", () => {
           });
 
           // Save history to local storage
-          if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-            chrome.storage.local.set({ chatHistory: chatHistory });
-          }
+          saveChatsToStorage();
         }
       }
 
@@ -672,6 +847,7 @@ document.addEventListener("DOMContentLoaded", () => {
       assistantBubble.appendChild(errorDiv);
     } finally {
       setStopState(false);
+      saveChatsToStorage();
       scrollToBottom();
     }
   }

@@ -831,3 +831,124 @@ body {
   background-color: #f87171 !important;
 }
 
+/* Header actions list */
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Chats Pane */
+.chats-pane {
+  background-color: #1e293b;
+  border-bottom: 1px solid #334155;
+  max-height: 250px;
+  overflow-y: auto;
+  transition: all 0.3s ease-out;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chats-pane.collapsed {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-bottom-width: 0;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.chats-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #334155;
+  padding-bottom: 8px;
+}
+
+.chats-header h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
+.compact-btn {
+  padding: 4px 10px !important;
+  font-size: 0.75rem !important;
+  height: auto !important;
+}
+
+.chats-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.chat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.chat-item:hover {
+  border-color: #475569;
+  background-color: #1e293b;
+}
+
+.chat-item.active {
+  border-color: #3b82f6;
+  background-color: rgba(59, 130, 246, 0.15);
+}
+
+.chat-item-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.chat-item-icon {
+  font-size: 0.875rem;
+  flex-shrink: 0;
+}
+
+.chat-item-title {
+  font-size: 0.8rem;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-item-delete {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.chat-item-delete:hover {
+  color: #ef4444;
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+

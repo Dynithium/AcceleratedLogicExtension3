@@ -19,7 +19,9 @@ import {
   Laptop,
   Check,
   RotateCw,
-  Globe
+  Globe,
+  MessageSquare,
+  Trash2
 } from "lucide-react";
 
 // Code listings to display in the live Explorer
@@ -1421,13 +1423,79 @@ export default function App() {
   const [simShowKey, setSimShowKey] = useState<boolean>(false);
   const [simAttachment, setSimAttachment] = useState<any>(null);
   const [simPlusMenuOpen, setSimPlusMenuOpen] = useState<boolean>(false);
-  const [simMessages, setSimMessages] = useState<Array<any>>([
-    {
-      id: 1,
-      role: "assistant",
-      text: "Hello! Paste your Gemini API key in the settings (⚙️) above to start. You can type prompts, upload files, or simulate taking page captures of this builder app!",
+  
+  // Multiple Chats in Simulator
+  const [simChats, setSimChats] = useState<Array<any>>(() => {
+    const saved = localStorage.getItem("simChats");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
     }
-  ]);
+    return [
+      {
+        id: "chat-default",
+        title: "Chat 1",
+        messages: [
+          {
+            id: 1,
+            role: "assistant",
+            text: "Hello! Paste your Gemini API key in the settings (⚙️) above to start. You can type prompts, upload files, or simulate taking page captures of this builder app!",
+          }
+        ]
+      }
+    ];
+  });
+  const [simActiveChatId, setSimActiveChatId] = useState<string>(() => {
+    return localStorage.getItem("simActiveChatId") || "chat-default";
+  });
+  const [simChatsOpen, setSimChatsOpen] = useState<boolean>(false);
+
+  // Derive simMessages based on active chat
+  const activeSimChat = simChats.find(c => c.id === simActiveChatId) || simChats[0];
+  const simMessages = activeSimChat ? activeSimChat.messages : [];
+
+  // Custom setSimMessages interceptor to update active chat
+  const setSimMessages = (updater: any) => {
+    setSimChats(prevChats => {
+      const updated = prevChats.map(chat => {
+        if (chat.id === simActiveChatId) {
+          const currentMsgs = chat.messages || [];
+          const newMessages = typeof updater === "function" ? updater(currentMsgs) : updater;
+          
+          let newTitle = chat.title;
+          if (chat.title === "New Chat" || chat.title.startsWith("Chat ")) {
+            const firstUser = newMessages.find((m: any) => m.role === "user");
+            if (firstUser && firstUser.text) {
+              let rawText = firstUser.text.trim();
+              if (rawText.includes("DOM innerText Context")) {
+                const index = rawText.indexOf("User Prompt:");
+                if (index !== -1) {
+                  rawText = rawText.substring(index + 12).trim();
+                }
+              }
+              newTitle = rawText.substring(0, 25) || "New Chat";
+            }
+          }
+          
+          return {
+            ...chat,
+            title: newTitle,
+            messages: newMessages
+          };
+        }
+        return chat;
+      });
+      localStorage.setItem("simChats", JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  useEffect(() => {
+    localStorage.setItem("simActiveChatId", simActiveChatId);
+  }, [simActiveChatId]);
+
   const [simLoading, setSimLoading] = useState<boolean>(false);
   const [simGenerating, setSimGenerating] = useState<boolean>(false);
   const simAbortControllerRef = useRef<AbortController | null>(null);
@@ -2259,14 +2327,100 @@ To install this tool directly into your Chrome browser, check out the **Installa
                     <span className="text-blue-400 text-xs">✨</span>
                     <span className="text-[11px] font-semibold text-slate-200">Gemini Companion Side Panel</span>
                   </div>
-                  <button
-                    onClick={() => setSimSettingsOpen(!simSettingsOpen)}
-                    className={`p-1 rounded text-slate-400 hover:text-slate-100 transition cursor-pointer ${simSettingsOpen ? "bg-slate-700 text-white" : ""}`}
-                    title="Settings"
-                  >
-                    <Settings className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => {
+                        setSimChatsOpen(!simChatsOpen);
+                        setSimSettingsOpen(false);
+                      }}
+                      className={`p-1 rounded text-slate-400 hover:text-slate-100 transition cursor-pointer ${simChatsOpen ? "bg-slate-700 text-white" : ""}`}
+                      title="My Chats"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSimSettingsOpen(!simSettingsOpen);
+                        setSimChatsOpen(false);
+                      }}
+                      className={`p-1 rounded text-slate-400 hover:text-slate-100 transition cursor-pointer ${simSettingsOpen ? "bg-slate-700 text-white" : ""}`}
+                      title="Settings"
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </header>
+
+                {/* Simulated Chats Window */}
+                {simChatsOpen && (
+                  <div className="absolute top-[38px] left-0 w-full bg-slate-800 border-b border-slate-700 px-3.5 py-3 z-30 space-y-2.5 shadow-xl text-left">
+                    <div className="flex justify-between items-center border-b border-slate-700 pb-1.5">
+                      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">My Chats</h4>
+                      <button
+                        onClick={() => {
+                          const newChat = {
+                            id: "chat-" + Date.now(),
+                            title: `New Chat`,
+                            messages: [
+                              {
+                                id: Date.now(),
+                                role: "assistant",
+                                text: "New chat started! Ask anything or upload page capture contexts."
+                              }
+                            ]
+                          };
+                          const updated = [newChat, ...simChats];
+                          setSimChats(updated);
+                          setSimActiveChatId(newChat.id);
+                          localStorage.setItem("simChats", JSON.stringify(updated));
+                          setSimChatsOpen(false);
+                        }}
+                        className="text-[9px] bg-blue-600 hover:bg-blue-500 text-white font-medium px-2 py-0.5 rounded cursor-pointer transition flex items-center gap-1"
+                      >
+                        <Plus className="w-2.5 h-2.5" /> New Chat
+                      </button>
+                    </div>
+
+                    <div className="max-h-[160px] overflow-y-auto space-y-1.5 pr-1">
+                      {simChats.map((chat) => (
+                        <div
+                          key={chat.id}
+                          onClick={() => {
+                            setSimActiveChatId(chat.id);
+                            setSimChatsOpen(false);
+                          }}
+                          className={`flex justify-between items-center px-2 py-1.5 rounded text-[11px] cursor-pointer border transition ${
+                            chat.id === simActiveChatId
+                              ? "bg-slate-700 border-blue-500 text-slate-100"
+                              : "bg-slate-950/40 border-slate-800 text-slate-300 hover:bg-slate-750"
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 overflow-hidden flex-1 mr-2">
+                            <span className="text-blue-400/80">💬</span>
+                            <span className="truncate font-medium">{chat.title}</span>
+                          </div>
+                          
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (simChats.length <= 1) return;
+                              const remaining = simChats.filter(c => c.id !== chat.id);
+                              setSimChats(remaining);
+                              localStorage.setItem("simChats", JSON.stringify(remaining));
+                              if (simActiveChatId === chat.id) {
+                                setSimActiveChatId(remaining[0].id);
+                              }
+                            }}
+                            className="text-slate-400 hover:text-rose-500 p-0.5 rounded transition hover:bg-slate-700/50"
+                            title="Delete Chat"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Simulated Settings Window */}
                 {simSettingsOpen && (
