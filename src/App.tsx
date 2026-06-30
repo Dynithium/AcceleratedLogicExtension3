@@ -1102,6 +1102,284 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 });`;
 
+// React Formatting & LaTeX math parser
+const renderLatexUnicode = (formula: string) => {
+  let text = formula;
+  const replacements: Record<string, string> = {
+    '\\alpha': 'α', '\\beta': 'β', '\\gamma': 'γ', '\\delta': 'δ', '\\epsilon': 'ε',
+    '\\zeta': 'ζ', '\\eta': 'η', '\\theta': 'θ', '\\iota': 'ι', '\\kappa': 'κ',
+    '\\lambda': 'λ', '\\mu': 'μ', '\\nu': 'ν', '\\xi': 'ξ', '\\pi': 'π',
+    '\\rho': 'ρ', '\\sigma': 'σ', '\\tau': 'τ', '\\upsilon': 'υ', '\\phi': 'φ',
+    '\\chi': 'χ', '\\psi': 'ψ', '\\omega': 'ω',
+    '\\Delta': 'Δ', '\\Gamma': 'Γ', '\\Theta': 'Θ', '\\Lambda': 'Λ', '\\Xi': 'Ξ',
+    '\\Pi': 'Π', '\\Sigma': 'Σ', '\\Phi': 'Φ', '\\Psi': 'Ψ', '\\Omega': 'Ω',
+    '\\infty': '∞', '\\pm': '±', '\\times': '×', '\\div': '÷', 
+    '\\neq': '≠', '\\approx': '≈', '\\leq': '≤', '\\geq': '≥', '\\le': '≤', '\\ge': '≥',
+    '\\to': '→', '\\rightarrow': '→', '\\leftarrow': '←', '\\leftrightarrow': '↔',
+    '\\partial': '∂', '\\nabla': '∇', '\\cdot': '·', '\\bullet': '•',
+    '\\forall': '∀', '\\exists': '∃', '\\in': '∈', '\\notin': '∉', '\\ni': '∋',
+    '\\subset': '⊂', '\\supset': '⊃', '\\subseteq': '⊆', '\\supseteq': '⊇',
+    '\\cup': '∪', '\\cap': '∩', '\\empty': '∅', '\\varnothing': '∅',
+    '\\int': '∫', '\\sum': '∑', '\\prod': '∏', '\\sqrt': '√'
+  };
+
+  const sortedKeys = Object.keys(replacements).sort((a, b) => b.length - a.length);
+  for (const key of sortedKeys) {
+    const regex = new RegExp(key.replace(/\\/g, '\\\\'), 'g');
+    text = text.replace(regex, replacements[key]);
+  }
+
+  text = text.replace(/\^\{([^\}]+?)\}/g, '^($1)');
+  text = text.replace(/_\{([^\}]+?)\}/g, '_($1)');
+  text = text.replace(/\\frac\{([^\}]+?)\}\{([^\}]+?)\}/g, '($1/$2)');
+  text = text.replace(/\\/g, '');
+  return text;
+};
+
+const renderInlineStyles = (text: string) => {
+  let parts: Array<{ type: 'text' | 'bold' | 'italic' | 'code' | 'latex'; content: string }> = [
+    { type: 'text', content: text }
+  ];
+
+  let nextParts: typeof parts = [];
+  for (const part of parts) {
+    if (part.type === 'text') {
+      const subParts = part.content.split(/\$([^\$\n]+?)\$/g);
+      subParts.forEach((sub, subIdx) => {
+        if (subIdx % 2 === 1) {
+          if (/^\d+(\.\d+)?(M|K|B)?$/.test(sub)) {
+            nextParts.push({ type: 'text', content: `$${sub}$` });
+          } else {
+            nextParts.push({ type: 'latex', content: sub });
+          }
+        } else if (sub) {
+          nextParts.push({ type: 'text', content: sub });
+        }
+      });
+    } else {
+      nextParts.push(part);
+    }
+  }
+  parts = nextParts;
+
+  nextParts = [];
+  for (const part of parts) {
+    if (part.type === 'text') {
+      const subParts = part.content.split(/`([^`\n]+?)`/g);
+      subParts.forEach((sub, subIdx) => {
+        if (subIdx % 2 === 1) {
+          nextParts.push({ type: 'code', content: sub });
+        } else if (sub) {
+          nextParts.push({ type: 'text', content: sub });
+        }
+      });
+    } else {
+      nextParts.push(part);
+    }
+  }
+  parts = nextParts;
+
+  nextParts = [];
+  for (const part of parts) {
+    if (part.type === 'text') {
+      const subParts = part.content.split(/\*\*([\s\S]+?)\*\*/g);
+      subParts.forEach((sub, subIdx) => {
+        if (subIdx % 2 === 1) {
+          nextParts.push({ type: 'bold', content: sub });
+        } else if (sub) {
+          nextParts.push({ type: 'text', content: sub });
+        }
+      });
+    } else {
+      nextParts.push(part);
+    }
+  }
+  parts = nextParts;
+
+  nextParts = [];
+  for (const part of parts) {
+    if (part.type === 'text') {
+      const subParts = part.content.split(/\*([\s\S]+?)\*/g);
+      subParts.forEach((sub, subIdx) => {
+        if (subIdx % 2 === 1) {
+          nextParts.push({ type: 'italic', content: sub });
+        } else if (sub) {
+          nextParts.push({ type: 'text', content: sub });
+        }
+      });
+    } else {
+      nextParts.push(part);
+    }
+  }
+  parts = nextParts;
+
+  return parts.map((part, idx) => {
+    switch (part.type) {
+      case 'bold':
+        return <strong key={idx} className="font-bold text-slate-100">{part.content}</strong>;
+      case 'italic':
+        return <em key={idx} className="italic text-slate-300">{part.content}</em>;
+      case 'code':
+        return (
+          <code key={idx} className="font-mono text-[9px] bg-rose-500/10 border border-rose-500/20 text-rose-300 px-1 py-0.5 rounded">
+            {part.content}
+          </code>
+        );
+      case 'latex':
+        return (
+          <span key={idx} className="font-serif italic text-blue-400 px-0.5">
+            {renderLatexUnicode(part.content)}
+          </span>
+        );
+      default:
+        return <span key={idx}>{part.content}</span>;
+    }
+  });
+};
+
+const renderMarkdownTextBlock = (text: string) => {
+  const paragraphs = text.split(/\n{2,}/);
+  
+  return paragraphs.map((para, paraIdx) => {
+    const trimmed = para.trim();
+    if (!trimmed) return null;
+    
+    if (trimmed.startsWith('### ')) {
+      return <h4 key={paraIdx} className="text-xs font-bold text-slate-100 mt-2 mb-1">{renderInlineStyles(trimmed.substring(4))}</h4>;
+    }
+    if (trimmed.startsWith('## ')) {
+      return <h3 key={paraIdx} className="text-sm font-bold text-slate-100 mt-2 mb-1">{renderInlineStyles(trimmed.substring(3))}</h3>;
+    }
+    if (trimmed.startsWith('# ')) {
+      return <h2 key={paraIdx} className="text-base font-bold text-slate-100 mt-2.5 mb-1.5">{renderInlineStyles(trimmed.substring(2))}</h2>;
+    }
+    if (trimmed.startsWith('> ')) {
+      return (
+        <blockquote key={paraIdx} className="border-l-2 border-blue-500 bg-blue-500/5 px-2 py-1 my-1 rounded-r italic text-slate-400">
+          {renderInlineStyles(trimmed.substring(2))}
+        </blockquote>
+      );
+    }
+    
+    const lines = trimmed.split('\n');
+    const isList = lines.every(line => /^\s*([-*]|\d+\.)\s+/.test(line));
+    
+    if (isList) {
+      const isOrdered = /^\s*\d+\.\s+/.test(lines[0]);
+      const items = lines.map((line, lineIdx) => {
+        const content = line.replace(/^\s*([-*]|\d+\.)\s+/, '');
+        return <li key={lineIdx} className="mb-0.5">{renderInlineStyles(content)}</li>;
+      });
+      
+      if (isOrdered) {
+        return <ol key={paraIdx} className="list-decimal pl-4 mb-1.5 space-y-0.5">{items}</ol>;
+      } else {
+        return <ul key={paraIdx} className="list-disc pl-4 mb-1.5 space-y-0.5">{items}</ul>;
+      }
+    }
+    
+    return (
+      <p key={paraIdx} className="mb-1">
+        {lines.map((line, lineIdx) => (
+          <React.Fragment key={lineIdx}>
+            {lineIdx > 0 && <br />}
+            {renderInlineStyles(line)}
+          </React.Fragment>
+        ))}
+      </p>
+    );
+  });
+};
+
+const renderFormattedContent = (text: string) => {
+  if (!text) return null;
+  const blocks: Array<{ type: 'text' | 'latex' | 'code'; content: string; lang?: string }> = [];
+  let currentText = text;
+  
+  while (currentText.length > 0) {
+    const latexStart = currentText.indexOf('$$');
+    const codeStart = currentText.indexOf('```');
+    
+    if (latexStart === -1 && codeStart === -1) {
+      blocks.push({ type: 'text', content: currentText });
+      break;
+    }
+    
+    if (latexStart !== -1 && (codeStart === -1 || latexStart < codeStart)) {
+      if (latexStart > 0) {
+        blocks.push({ type: 'text', content: currentText.substring(0, latexStart) });
+      }
+      const latexEnd = currentText.indexOf('$$', latexStart + 2);
+      if (latexEnd === -1) {
+        blocks.push({ type: 'latex', content: currentText.substring(latexStart + 2) });
+        break;
+      } else {
+        blocks.push({ type: 'latex', content: currentText.substring(latexStart + 2, latexEnd) });
+        currentText = currentText.substring(latexEnd + 2);
+      }
+    } else {
+      if (codeStart > 0) {
+        blocks.push({ type: 'text', content: currentText.substring(0, codeStart) });
+      }
+      const codeEnd = currentText.indexOf('```', codeStart + 3);
+      if (codeEnd === -1) {
+        blocks.push({ type: 'code', content: currentText.substring(codeStart + 3), lang: 'code' });
+        break;
+      } else {
+        const fullCodeBlock = currentText.substring(codeStart + 3, codeEnd);
+        const firstNewline = fullCodeBlock.indexOf('\n');
+        let lang = 'code';
+        let code = fullCodeBlock;
+        if (firstNewline !== -1) {
+          lang = fullCodeBlock.substring(0, firstNewline).trim() || 'code';
+          code = fullCodeBlock.substring(firstNewline + 1);
+        }
+        blocks.push({ type: 'code', content: code.trim(), lang });
+        currentText = currentText.substring(codeEnd + 3);
+      }
+    }
+  }
+
+  return (
+    <div className="space-y-2 text-[11px] leading-relaxed text-slate-200">
+      {blocks.map((block, idx) => {
+        if (block.type === 'latex') {
+          return (
+            <div key={idx} className="flex justify-center items-center my-2.5 p-2.5 rounded-lg border border-slate-700/60 bg-slate-900/60 font-serif italic text-center tracking-wide text-xs text-slate-100">
+              {renderLatexUnicode(block.content)}
+            </div>
+          );
+        } else if (block.type === 'code') {
+          return (
+            <div key={idx} className="rounded-lg border border-slate-700 bg-slate-950 overflow-hidden my-2">
+              <div className="flex justify-between items-center bg-slate-800 px-2.5 py-1 border-b border-slate-700 text-[9px] font-mono text-slate-400">
+                <span>{block.lang}</span>
+                <button 
+                  onClick={() => {
+                    navigator.clipboard.writeText(block.content);
+                  }}
+                  className="px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-650 text-slate-200 transition-colors"
+                >
+                  Copy
+                </button>
+              </div>
+              <pre className="p-2.5 overflow-x-auto text-[10px] font-mono text-slate-200 leading-normal">
+                <code>{block.content}</code>
+              </pre>
+            </div>
+          );
+        } else {
+          return (
+            <div key={idx} className="space-y-1.5">
+              {renderMarkdownTextBlock(block.content)}
+            </div>
+          );
+        }
+      })}
+    </div>
+  );
+};
+
 // Parses thinking blocks out of the text content inside React
 function parseThinkingAndContent(text: string) {
   let thinking = "";
@@ -1225,7 +1503,8 @@ export default function App() {
       attachment: currentAttach
     };
 
-    setSimMessages((prev) => [...prev, userMsg]);
+    const updatedMessages = [...simMessages, userMsg];
+    setSimMessages(updatedMessages);
     setSimInput("");
     setSimAttachment(null);
 
@@ -1233,140 +1512,244 @@ export default function App() {
 
     if (simApiKey) {
       setSimLoading(true);
-      const assistantMsgId = Date.now() + 1;
 
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModelId}:streamGenerateContent?key=${simApiKey}`;
         
-        let contentsParts = [];
-        if (currentAttach) {
-          let promptQuery = userMsgText;
-          if (currentAttach.domContext) {
-            promptQuery = `[Captured Webpage Context URL: ${currentAttach.domContext.url}]\n\nDOM content:\n---\n${currentAttach.domContext.text}\n---\n\nUser Question: ${userMsgText || "Analyze this webpage"}`;
+        // Prepare whole history
+        const chatHistoryForApi = updatedMessages.slice(0, -1).map(msg => {
+          if (msg.role === "user") {
+            const parts: any[] = [];
+            let textToQuery = msg.text;
+            if (msg.attachment) {
+              if (msg.attachment.domContext) {
+                textToQuery = `[Captured Webpage Context URL: ${msg.attachment.domContext.url}]\n\nDOM content:\n---\n${msg.attachment.domContext.text}\n---\n\nUser Question: ${msg.text || "Analyze this webpage"}`;
+              }
+              if (msg.attachment.base64 && msg.attachment.base64.startsWith("data:")) {
+                parts.push({
+                  inlineData: {
+                    mimeType: msg.attachment.type || "image/jpeg",
+                    data: msg.attachment.base64.split(",")[1]
+                  }
+                });
+              }
+            }
+            parts.push({ text: textToQuery });
+            return { role: "user", parts };
+          } else {
+            return { role: "model", parts: [{ text: msg.text }] };
           }
+        });
 
+        // Add current user prompt
+        const currentParts: any[] = [];
+        let currentText = userMsgText;
+        if (currentAttach) {
+          if (currentAttach.domContext) {
+            currentText = `[Captured Webpage Context URL: ${currentAttach.domContext.url}]\n\nDOM content:\n---\n${currentAttach.domContext.text}\n---\n\nUser Question: ${userMsgText || "Analyze this webpage"}`;
+          }
           if (currentAttach.base64 && currentAttach.base64.startsWith("data:")) {
-            contentsParts.push({
+            currentParts.push({
               inlineData: {
                 mimeType: currentAttach.type,
                 data: currentAttach.base64.split(",")[1]
               }
             });
           }
-          contentsParts.push({ text: promptQuery || "Analyze attachment" });
-        } else {
-          contentsParts.push({ text: userMsgText });
         }
+        currentParts.push({ text: currentText || "Analyze attachment" });
+        chatHistoryForApi.push({ role: "user", parts: currentParts });
 
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contents: [{ role: "user", parts: contentsParts }] })
-        });
+        let hasMoreTurns = true;
+        let localHistory = [...chatHistoryForApi];
 
-        if (!response.ok) {
-          const err = await response.json();
-          throw new Error(err.error?.message || `HTTP ${response.status}`);
-        }
+        while (hasMoreTurns) {
+          hasMoreTurns = false;
+          let activeFunctionCall: any = null;
 
-        if (!response.body) {
-          throw new Error("ReadableStream not supported on this browser.");
-        }
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: localHistory,
+              tools: [{
+                functionDeclarations: [
+                  {
+                    name: "get_page_dom",
+                    description: "Retrieves the webpage text context, title, and URL of the active browser tab to answer user context questions.",
+                    parameters: { type: "OBJECT", properties: {} }
+                  },
+                  {
+                    name: "get_page_screenshot",
+                    description: "Captures a visual screenshot of the current visible tab's viewport as base64 JPEG image data.",
+                    parameters: { type: "OBJECT", properties: {} }
+                  }
+                ]
+              }]
+            })
+          });
 
-        setSimLoading(false);
-
-        // Add empty message to populate
-        setSimMessages((prev) => [
-          ...prev,
-          {
-            id: assistantMsgId,
-            role: "assistant",
-            text: ""
+          if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error?.message || `HTTP ${response.status}`);
           }
-        ]);
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder("utf-8");
-        let accumulatedText = "";
-        let buffer = "";
+          if (!response.body) {
+            throw new Error("ReadableStream not supported on this browser.");
+          }
 
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
+          setSimLoading(false);
 
-          const chunk = decoder.decode(value, { stream: true });
-          buffer += chunk;
-
-          let b = 0;
-          while (b < buffer.length) {
-            const startIdx = buffer.indexOf('{', b);
-            if (startIdx === -1) {
-              break;
+          // Add a new assistant message bubble for this turn
+          const turnMsgId = Date.now() + Math.random();
+          setSimMessages((prev) => [
+            ...prev,
+            {
+              id: turnMsgId,
+              role: "assistant",
+              text: ""
             }
+          ]);
 
-            let bracketCount = 0;
-            let endIdx = -1;
-            let inString = false;
-            let escape = false;
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder("utf-8");
+          let accumulatedText = "";
+          let buffer = "";
 
-            for (let i = startIdx; i < buffer.length; i++) {
-              const char = buffer[i];
-              if (escape) {
-                escape = false;
-                continue;
-              }
-              if (char === '\\') {
-                escape = true;
-                continue;
-              }
-              if (char === '"') {
-                inString = !inString;
-                continue;
-              }
-              if (!inString) {
-                if (char === '{') {
-                  bracketCount++;
-                } else if (char === '}') {
-                  bracketCount--;
-                  if (bracketCount === 0) {
-                    endIdx = i;
-                    break;
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+
+            let b = 0;
+            while (b < buffer.length) {
+              const startIdx = buffer.indexOf('{', b);
+              if (startIdx === -1) break;
+
+              let bracketCount = 0;
+              let endIdx = -1;
+              let inString = false;
+              let escape = false;
+
+              for (let i = startIdx; i < buffer.length; i++) {
+                const char = buffer[i];
+                if (escape) { escape = false; continue; }
+                if (char === '\\') { escape = true; continue; }
+                if (char === '"') { inString = !inString; continue; }
+                if (!inString) {
+                  if (char === '{') bracketCount++;
+                  else if (char === '}') {
+                    bracketCount--;
+                    if (bracketCount === 0) { endIdx = i; break; }
                   }
                 }
               }
-            }
 
-            if (endIdx !== -1) {
-              const jsonStr = buffer.substring(startIdx, endIdx + 1);
-              try {
-                const obj = JSON.parse(jsonStr);
-                const text = obj.candidates?.[0]?.content?.parts?.[0]?.text || "";
-                if (text) {
-                  accumulatedText += text;
-                  setSimMessages((prev) =>
-                    prev.map((msg) =>
-                      msg.id === assistantMsgId ? { ...msg, text: accumulatedText } : msg
-                    )
-                  );
+              if (endIdx !== -1) {
+                const jsonStr = buffer.substring(startIdx, endIdx + 1);
+                try {
+                  const obj = JSON.parse(jsonStr);
+                  const parts = obj.candidates?.[0]?.content?.parts;
+                  if (parts) {
+                    for (const part of parts) {
+                      if (part.text) {
+                        accumulatedText += part.text;
+                        setSimMessages((prev) =>
+                          prev.map((msg) =>
+                            msg.id === turnMsgId ? { ...msg, text: accumulatedText } : msg
+                          )
+                        );
+                      }
+                      if (part.functionCall) {
+                        activeFunctionCall = part.functionCall;
+                      }
+                    }
+                  }
+                } catch (e) {
+                  console.warn("Could not parse JSON object in stream:", e);
                 }
-              } catch (e) {
-                console.warn("Could not parse JSON object in stream:", e);
+                b = endIdx + 1;
+              } else {
+                break;
               }
-              b = endIdx + 1;
-            } else {
-              break;
             }
+            buffer = buffer.substring(b);
           }
-          buffer = buffer.substring(b);
-        }
 
-        if (!accumulatedText) {
-          throw new Error("No text content returned from the stream.");
+          if (activeFunctionCall) {
+            hasMoreTurns = true;
+
+            // 1. Save model function call to local history
+            localHistory.push({
+              role: "model",
+              parts: [{ functionCall: activeFunctionCall }]
+            });
+
+            // 2. Execute tool inside simulator
+            let toolOutput: any = null;
+            if (activeFunctionCall.name === "get_page_dom") {
+              toolOutput = {
+                success: true,
+                title: "Gemini Extension Builder",
+                url: "https://gemini-extension-builder.ai.studio",
+                text: "Gemini Extension Builder is an advanced workbench to package custom Manifest V3 extensions. The app facilitates in-browser compilation of manifest.json, popup.html, popup.css, and popup.js into a packed ZIP folder. Built on June 2026, it uses React, Tailwind v4 and local JSZip compiler."
+              };
+            } else {
+              // screenshot
+              toolOutput = {
+                success: true,
+                screenshot_url: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+              };
+            }
+
+            // Append status note to the assistant's text
+            const textWithTool = accumulatedText + `\n\n⚙️ *Called tool: ${activeFunctionCall.name}()*\n⚙️ *Response:* Context successfully loaded!`;
+            setSimMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === turnMsgId ? { ...msg, text: textWithTool } : msg
+              )
+            );
+
+            // 3. Save function response to local history
+            const responseParts: any[] = [
+              {
+                functionResponse: {
+                  name: activeFunctionCall.name,
+                  response: toolOutput
+                }
+              }
+            ];
+
+            if (activeFunctionCall.name === "get_page_screenshot") {
+              responseParts.push({
+                inlineData: {
+                  mimeType: "image/jpeg",
+                  data: "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+                }
+              });
+            }
+
+            localHistory.push({
+              role: "user",
+              parts: responseParts
+            });
+
+            // Set loading spinner back on
+            setSimLoading(true);
+            await new Promise((r) => setTimeout(r, 600)); // smooth delay
+          } else {
+            // standard end of generation
+            localHistory.push({
+              role: "model",
+              parts: [{ text: accumulatedText }]
+            });
+          }
         }
 
       } catch (e: any) {
         setSimLoading(false);
-        setSimMessages((prev) => prev.filter((msg) => msg.id !== assistantMsgId));
         setSimMessages((prev) => [
           ...prev,
           {
@@ -1974,14 +2357,14 @@ To install this tool directly into your Chrome browser, check out the **Installa
                                 </div>
                               )}
                               {parsed.content ? (
-                                <p className="whitespace-pre-wrap">{parsed.content}</p>
+                                <div className="text-left">{renderFormattedContent(parsed.content)}</div>
                               ) : (
                                 parsed.thinking ? null : <p className="whitespace-pre-wrap">...</p>
                               )}
                             </div>
                           );
                         } else {
-                          return <p className="whitespace-pre-wrap">{msg.text}</p>;
+                          return <div className="text-left whitespace-pre-wrap">{renderFormattedContent(msg.text)}</div>;
                         }
                       })()}
                     </div>

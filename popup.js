@@ -389,115 +389,224 @@ document.addEventListener("DOMContentLoaded", () => {
         activeModel = inputCustomModel.value.trim() || "gemini-2.5-flash";
       }
 
-      // Call Gemini API directly with streamGenerateContent
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:streamGenerateContent?key=${apiKey}`;
-      
-      const payload = {
-        contents: chatHistory
-      };
+      // We run a recursive loop to allow multiple turns of tool execution if requested
+      let hasMoreTurns = true;
+      let currentAssistantBubble = assistantBubble;
+      let currentLoaderDiv = loaderDiv;
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
-      });
+      while (hasMoreTurns) {
+        hasMoreTurns = false;
+        let activeFunctionCall = null;
 
-      if (!response.ok) {
-        const errJson = await response.json();
-        throw new Error(errJson.error?.message || `API Error: ${response.status}`);
-      }
+        // Call Gemini API directly with streamGenerateContent and tools enabled
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:streamGenerateContent?key=${apiKey}`;
+        
+        const payload = {
+          contents: chatHistory,
+          tools: [{
+            functionDeclarations: [
+              {
+                name: "get_page_dom",
+                description: "Retrieves the webpage text context, title, and URL of the active browser tab to answer user context questions.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {}
+                }
+              },
+              {
+                name: "get_page_screenshot",
+                description: "Captures a visual screenshot of the current visible tab's viewport as base64 JPEG image data.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {}
+                }
+              }
+            ]
+          }]
+        };
 
-      if (!response.body) {
-        throw new Error("ReadableStream not supported on this browser.");
-      }
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let accumulatedText = "";
-      let buffer = "";
+        if (!response.ok) {
+          const errJson = await response.json();
+          throw new Error(errJson.error?.message || `API Error: ${response.status}`);
+        }
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
+        if (!response.body) {
+          throw new Error("ReadableStream not supported on this browser.");
+        }
 
-        const chunk = decoder.decode(value, { stream: true });
-        buffer += chunk;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let accumulatedText = "";
+        let buffer = "";
 
-        let b = 0;
-        while (b < buffer.length) {
-          const startIdx = buffer.indexOf('{', b);
-          if (startIdx === -1) {
-            break;
-          }
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
 
-          let bracketCount = 0;
-          let endIdx = -1;
-          let inString = false;
-          let escape = false;
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
 
-          for (let i = startIdx; i < buffer.length; i++) {
-            const char = buffer[i];
-            if (escape) {
-              escape = false;
-              continue;
+          let b = 0;
+          while (b < buffer.length) {
+            const startIdx = buffer.indexOf('{', b);
+            if (startIdx === -1) {
+              break;
             }
-            if (char === '\\') {
-              escape = true;
-              continue;
-            }
-            if (char === '"') {
-              inString = !inString;
-              continue;
-            }
-            if (!inString) {
-              if (char === '{') {
-                bracketCount++;
-              } else if (char === '}') {
-                bracketCount--;
-                if (bracketCount === 0) {
-                  endIdx = i;
-                  break;
+
+            let bracketCount = 0;
+            let endIdx = -1;
+            let inString = false;
+            let escape = false;
+
+            for (let i = startIdx; i < buffer.length; i++) {
+              const char = buffer[i];
+              if (escape) {
+                escape = false;
+                continue;
+              }
+              if (char === '\\') {
+                escape = true;
+                continue;
+              }
+              if (char === '"') {
+                inString = !inString;
+                continue;
+              }
+              if (!inString) {
+                if (char === '{') {
+                  bracketCount++;
+                } else if (char === '}') {
+                  bracketCount--;
+                  if (bracketCount === 0) {
+                    endIdx = i;
+                    break;
+                  }
                 }
               }
             }
+
+            if (endIdx !== -1) {
+              const jsonStr = buffer.substring(startIdx, endIdx + 1);
+              try {
+                const obj = JSON.parse(jsonStr);
+                const parts = obj.candidates?.[0]?.content?.parts;
+                if (parts) {
+                  for (const part of parts) {
+                    if (part.text) {
+                      accumulatedText += part.text;
+                      updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
+                      scrollToBottom();
+                    }
+                    if (part.functionCall) {
+                      activeFunctionCall = part.functionCall;
+                    }
+                  }
+                }
+              } catch (e) {
+                console.warn("Could not parse JSON object in stream:", e);
+              }
+              b = endIdx + 1;
+            } else {
+              break;
+            }
+          }
+          buffer = buffer.substring(b);
+        }
+
+        if (activeFunctionCall) {
+          // Model requested a tool execution! We set hasMoreTurns to true to send the response back
+          hasMoreTurns = true;
+
+          if (currentLoaderDiv && currentLoaderDiv.parentNode === currentAssistantBubble) {
+            currentLoaderDiv.remove();
           }
 
-          if (endIdx !== -1) {
-            const jsonStr = buffer.substring(startIdx, endIdx + 1);
-            try {
-              const obj = JSON.parse(jsonStr);
-              const text = obj.candidates?.[0]?.content?.parts?.[0]?.text || "";
-              if (text) {
-                accumulatedText += text;
-                updateAssistantBubble(assistantBubble, loaderDiv, accumulatedText);
-                scrollToBottom();
+          // Show status spinner in bubble
+          const toolStatus = document.createElement("div");
+          toolStatus.className = "tool-status-indicator";
+          toolStatus.innerHTML = `
+            <div class="spinner"></div>
+            <span>AI called <code>${activeFunctionCall.name}()</code>. Fetching active context...</span>
+          `;
+          currentAssistantBubble.appendChild(toolStatus);
+          scrollToBottom();
+
+          // 1. Add model's functionCall to chat history
+          chatHistory.push({
+            role: "model",
+            parts: [{ functionCall: activeFunctionCall }]
+          });
+
+          // 2. Execute the tool
+          const toolResult = await executeTool(activeFunctionCall.name, activeFunctionCall.args);
+
+          // Remove the status spinner
+          toolStatus.remove();
+
+          // Show tool success tag
+          const toolSuccessMsg = document.createElement("div");
+          toolSuccessMsg.className = "tool-success-note";
+          toolSuccessMsg.innerHTML = `⚙️ Executed tool <code>${activeFunctionCall.name}</code> successfully.`;
+          currentAssistantBubble.appendChild(toolSuccessMsg);
+          scrollToBottom();
+
+          // 3. Add functionResponse to chat history (with image attachment if it's get_page_screenshot)
+          const responseParts = [
+            {
+              functionResponse: {
+                name: activeFunctionCall.name,
+                response: toolResult
               }
-            } catch (e) {
-              console.warn("Could not parse JSON object in stream:", e);
             }
-            b = endIdx + 1;
-          } else {
-            break;
+          ];
+
+          if (activeFunctionCall.name === "get_page_screenshot" && toolResult.screenshot_url) {
+            const base64Data = toolResult.screenshot_url.split(",")[1];
+            responseParts.push({
+              inlineData: {
+                mimeType: "image/jpeg",
+                data: base64Data
+              }
+            });
+          }
+
+          chatHistory.push({
+            role: "user",
+            parts: responseParts
+          });
+
+          // Re-create a loader spinner for the next model turn
+          currentLoaderDiv = document.createElement("div");
+          currentLoaderDiv.className = "loading-indicator";
+          currentLoaderDiv.innerHTML = '<div class="spinner"></div> <span>Analyzing retrieved browser context...</span>';
+          currentAssistantBubble.appendChild(currentLoaderDiv);
+          scrollToBottom();
+
+        } else {
+          // No more tool calls, regular final response
+          if (!accumulatedText) {
+            throw new Error("No text content returned from the stream.");
+          }
+
+          // Append assistant response to history list
+          chatHistory.push({
+            role: "model",
+            parts: [{ text: accumulatedText }]
+          });
+
+          // Save history to local storage
+          if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            chrome.storage.local.set({ chatHistory: chatHistory });
           }
         }
-        buffer = buffer.substring(b);
-      }
-
-      if (!accumulatedText) {
-        throw new Error("No text content returned from the stream.");
-      }
-
-      // Append assistant response to history list
-      chatHistory.push({
-        role: "model",
-        parts: [{ text: accumulatedText }]
-      });
-
-      // Save history to local storage
-      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.set({ chatHistory: chatHistory });
       }
 
     } catch (err) {
@@ -517,6 +626,271 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     scrollToBottom();
+  }
+
+  // Pure JavaScript Client-Side Markdown and LaTeX Parser
+  function formatResponse(text) {
+    if (!text) return "";
+    
+    // Escape HTML first to prevent XSS
+    let escaped = text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+    const latexBlocks = [];
+    const latexInlines = [];
+
+    // Match block math: $$ ... $$ or \[ ... \]
+    escaped = escaped.replace(/\$\$([\s\S]+?)\$\$/g, (match, formula) => {
+      const id = `__LATEX_BLOCK_${latexBlocks.length}__`;
+      latexBlocks.push(formula.trim());
+      return id;
+    });
+    
+    escaped = escaped.replace(/\\\[([\s\S]+?)\\\]/g, (match, formula) => {
+      const id = `__LATEX_BLOCK_${latexBlocks.length}__`;
+      latexBlocks.push(formula.trim());
+      return id;
+    });
+
+    // Match inline math: $ ... $ (avoiding double $ and things like $10 or $5.50)
+    escaped = escaped.replace(/\$([^\$\n]+?)\$/g, (match, formula) => {
+      if (/^\d+(\.\d+)?(M|K|B)?$/.test(formula)) {
+        return match; 
+      }
+      const id = `__LATEX_INLINE_${latexInlines.length}__`;
+      latexInlines.push(formula.trim());
+      return id;
+    });
+
+    escaped = escaped.replace(/\\\(([\s\S]+?)\\\)/g, (match, formula) => {
+      const id = `__LATEX_INLINE_${latexInlines.length}__`;
+      latexInlines.push(formula.trim());
+      return id;
+    });
+
+    // Parse Code Blocks: ```lang\ncode\n```
+    const codeBlocks = [];
+    escaped = escaped.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+      const id = `__CODE_BLOCK_${codeBlocks.length}__`;
+      codeBlocks.push({ lang: lang || 'code', code: code });
+      return id;
+    });
+
+    // Parse Inline Code: `code`
+    escaped = escaped.replace(/`([^`\n]+?)`/g, (match, code) => {
+      return `<code class="inline-code">${code}</code>`;
+    });
+
+    // Parse Headers
+    escaped = escaped.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
+    escaped = escaped.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
+    escaped = escaped.replace(/^# (.*?)$/gm, '<h1>$1</h1>');
+
+    // Bold & Italic
+    escaped = escaped.replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>');
+    escaped = escaped.replace(/__([\s\S]+?)__/g, '<strong>$1</strong>');
+    escaped = escaped.replace(/\*([\s\S]+?)\*/g, '<em>$1</em>');
+    escaped = escaped.replace(/_([\s\S]+?)_/g, '<em>$1</em>');
+
+    // Blockquotes
+    escaped = escaped.replace(/^&gt; (.*?)$/gm, '<blockquote>$1</blockquote>');
+
+    // Lists
+    escaped = escaped.replace(/^\s*[-*]\s+(.*?)$/gm, '<li>$1</li>');
+    escaped = escaped.replace(/^\s*\d+\.\s+(.*?)$/gm, '<li class="ordered">$1</li>');
+
+    // Paragraphs and Newlines
+    const lines = escaped.split(/\n{2,}/);
+    const formattedParagraphs = lines.map(line => {
+      line = line.trim();
+      if (!line) return "";
+      
+      if (line.startsWith("__CODE_BLOCK_") || 
+          line.startsWith("__LATEX_BLOCK_") || 
+          line.startsWith("<h") || 
+          line.startsWith("<blockquote") ||
+          line.startsWith("<li")) {
+        return line;
+      }
+      
+      return `<p>${line.replace(/\n/g, '<br>')}</p>`;
+    });
+    
+    escaped = formattedParagraphs.filter(Boolean).join("\n");
+
+    // Group adjacent list items
+    escaped = escaped.replace(/(<li>.*?<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
+    escaped = escaped.replace(/(<li class="ordered">.*?<\/li>\n?)+/g, (match) => {
+      const clean = match.replace(/ class="ordered"/g, '');
+      return `<ol>${clean}</ol>`;
+    });
+
+    // Re-insert Code Blocks with copy buttons
+    codeBlocks.forEach((item, index) => {
+      const placeholder = `__CODE_BLOCK_${index}__`;
+      const cleanCode = item.code.trim();
+      const codeHtml = `
+        <div class="code-block-container">
+          <div class="code-block-header">
+            <span class="code-block-lang">${item.lang}</span>
+            <button class="code-copy-btn" onclick="navigator.clipboard.writeText(this.nextElementSibling.innerText); this.innerText='Copied!'; setTimeout(()=>this.innerText='Copy', 1500)">Copy</button>
+            <pre class="hidden-code-text" style="display:none">${cleanCode}</pre>
+          </div>
+          <pre class="code-block-content"><code>${cleanCode}</code></pre>
+        </div>
+      `;
+      escaped = escaped.replace(placeholder, codeHtml);
+    });
+
+    // Re-insert LaTeX Blocks with serif equations
+    latexBlocks.forEach((formula, index) => {
+      const placeholder = `__LATEX_BLOCK_${index}__`;
+      const mathHtml = `
+        <div class="latex-block">
+          <div class="latex-formula">${renderLatexToHtml(formula)}</div>
+        </div>
+      `;
+      escaped = escaped.replace(placeholder, mathHtml);
+    });
+
+    // Re-insert LaTeX Inlines
+    latexInlines.forEach((formula, index) => {
+      const placeholder = `__LATEX_INLINE_${index}__`;
+      const mathHtml = `<span class="latex-inline">${renderLatexToHtml(formula)}</span>`;
+      escaped = escaped.replace(placeholder, mathHtml);
+    });
+
+    return escaped;
+  }
+
+  // Unicode LaTeX math parser
+  function renderLatexToHtml(formula) {
+    let html = formula;
+
+    const replacements = {
+      '\\\\alpha': 'α', '\\\\beta': 'β', '\\\\gamma': 'γ', '\\\\delta': 'δ', '\\\\epsilon': 'ε',
+      '\\\\zeta': 'ζ', '\\\\eta': 'η', '\\\\theta': 'θ', '\\\\iota': 'ι', '\\\\kappa': 'κ',
+      '\\\\lambda': 'λ', '\\\\mu': 'μ', '\\\\nu': 'ν', '\\\\xi': 'ξ', '\\\\pi': 'π',
+      '\\\\rho': 'ρ', '\\\\sigma': 'σ', '\\\\tau': 'τ', '\\\\upsilon': 'υ', '\\\\phi': 'φ',
+      '\\\\chi': 'χ', '\\\\psi': 'ψ', '\\\\omega': 'ω',
+      '\\\\Delta': 'Δ', '\\\\Gamma': 'Γ', '\\\\Theta': 'Θ', '\\\\Lambda': 'Λ', '\\\\Xi': 'Ξ',
+      '\\\\Pi': 'Π', '\\\\Sigma': 'Σ', '\\\\Phi': 'Φ', '\\\\Psi': 'Ψ', '\\\\Omega': 'Ω',
+      
+      '\\\\infty': '∞', '\\\\pm': '±', '\\\\times': '×', '\\\\div': '÷', 
+      '\\\\neq': '≠', '\\\\approx': '≈', '\\\\leq': '≤', '\\\\geq': '≥', '\\\\le': '≤', '\\\\ge': '≥',
+      '\\\\to': '→', '\\\\rightarrow': '→', '\\\\leftarrow': '←', '\\\\leftrightarrow': '↔',
+      '\\\\partial': '∂', '\\\\nabla': '∇', '\\\\cdot': '·', '\\\\bullet': '•',
+      '\\\\forall': '∀', '\\\\exists': '∃', '\\\\in': '∈', '\\\\notin': '∉', '\\\\ni': '∋',
+      '\\\\subset': '⊂', '\\\\supset': '⊃', '\\\\subseteq': '⊆', '\\\\supseteq': '⊇',
+      '\\\\cup': '∪', '\\\\cap': '∩', '\\\\empty': '∅', '\\\\varnothing': '∅',
+      
+      '\\\\int': '∫', '\\\\sum': '∑', '\\\\prod': '∏', '\\\\sqrt': '√'
+    };
+
+    const sortedKeys = Object.keys(replacements).sort((a, b) => b.length - a.length);
+    for (const key of sortedKeys) {
+      const regex = new RegExp(key, 'g');
+      html = html.replace(regex, replacements[key]);
+    }
+
+    // Superscripts & Subscripts
+    html = html.replace(/\^\{([^\}]+?)\}/g, '<sup>$1</sup>');
+    html = html.replace(/\^([a-zA-Z0-9\-+\*=]+)/g, '<sup>$1</sup>');
+    html = html.replace(/_\{([^\}]+?)\}/g, '<sub>$1</sub>');
+    html = html.replace(/_([a-zA-Z0-9\-+\*=]+)/g, '<sub>$1</sub>');
+
+    // Fractions: \frac{num}{den}
+    html = html.replace(/\\frac\{([^\}]+?)\}\{([^\}]+?)\}/g, '<span class="latex-frac"><span class="latex-num">$1</span><span class="latex-den">$2</span></span>');
+
+    // Clear LaTeX formatting tags
+    html = html.replace(/\\mathrm\{([^\}]+?)\}/g, '$1');
+    html = html.replace(/\\text\{([^\}]+?)\}/g, '$1');
+    html = html.replace(/\\left/g, '');
+    html = html.replace(/\\right/g, '');
+    html = html.replace(/\\/g, '');
+
+    return html;
+  }
+
+  // Context extraction tool executor
+  function executeTool(name, args) {
+    return new Promise((resolve) => {
+      if (typeof chrome === "undefined" || !chrome.tabs) {
+        // Outside extension environment fallback
+        if (name === "get_page_dom") {
+          resolve({
+            success: true,
+            title: "Simulated Web Companion Blog",
+            url: "https://ai.google.dev/blog/gemini-web-companion",
+            text: "This is a simulated DOM context content. Manifest V3 Side Panels and high-context models transform browsers into active runtime workspaces. This sidebar is fully context-aware. With a single click, users can capture the page DOM or query visual layouts directly."
+          });
+        } else if (name === "get_page_screenshot") {
+          resolve({
+            success: true,
+            screenshot_url: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+          });
+        } else {
+          resolve({ error: "Unknown tool" });
+        }
+        return;
+      }
+
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (!tabs || tabs.length === 0) {
+          resolve({ error: "No active browser tab found." });
+          return;
+        }
+        const activeTab = tabs[0];
+
+        if (name === "get_page_dom") {
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            func: () => {
+              return {
+                title: document.title,
+                url: window.location.href,
+                text: document.body ? document.body.innerText.substring(0, 50000) : ""
+              };
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve({
+                success: true,
+                title: results[0].result.title,
+                url: results[0].result.url,
+                text: results[0].result.text
+              });
+            } else {
+              resolve({
+                success: true,
+                title: activeTab.title,
+                url: activeTab.url,
+                text: "Could not extract full innerText. Permission denied or scripting blocked on this system page."
+              });
+            }
+          });
+        } else if (name === "get_page_screenshot") {
+          chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 80 }, (screenshotUrl) => {
+            if (!screenshotUrl) {
+              resolve({
+                success: true,
+                screenshot_url: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+                message: "Failed to capture visual screenshot (restricted system tab). Fallback active."
+              });
+            } else {
+              resolve({
+                success: true,
+                screenshot_url: screenshotUrl
+              });
+            }
+          });
+        } else {
+          resolve({ error: "Unknown tool" });
+        }
+      });
+    });
   }
 
   // Parses thinking blocks out of the text content
@@ -607,7 +981,11 @@ document.addEventListener("DOMContentLoaded", () => {
       assistantBubble.appendChild(answerDiv);
     }
     
-    answerDiv.textContent = parsed.content || (parsed.thinking ? "" : "...");
+    if (parsed.content) {
+      answerDiv.innerHTML = formatResponse(parsed.content);
+    } else {
+      answerDiv.textContent = parsed.thinking ? "" : "...";
+    }
     
     // Auto-collapse thinking block when done thinking (when </thinking> is matched)
     if (thinkingBlock && accumulatedText.includes("</thinking>") && !thinkingBlock.dataset.autoCollapsed) {
@@ -673,7 +1051,7 @@ document.addEventListener("DOMContentLoaded", () => {
             
             const answerDiv = document.createElement("div");
             answerDiv.className = "bubble-answer bubble-text";
-            answerDiv.textContent = parsed.content || "";
+            answerDiv.innerHTML = formatResponse(parsed.content || "");
             bubble.appendChild(answerDiv);
           } else {
             const body = document.createElement("div");
@@ -703,6 +1081,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     scrollToBottom();
   }
+
 
   // Utilities
   function showToast(message) {
