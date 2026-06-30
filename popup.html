@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Gemini Web Companion</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header Section -->
+    <header class="app-header">
+      <div class="logo-area">
+        <span class="sparkle-icon">✨</span>
+        <h1 class="title">Gemini Companion</h1>
+      </div>
+      <button id="btn-settings" class="icon-button" title="Configure Settings">
+        ⚙️
+      </button>
+    </header>
+
+    <!-- Settings Pane (Collapsible) -->
+    <div id="settings-pane" class="settings-pane collapsed">
+      <div class="settings-header">
+        <h3>Configuration</h3>
+      </div>
+      <div class="settings-body">
+        <div class="form-group">
+          <label for="input-api-key">Gemini API Key</label>
+          <div class="input-with-action">
+            <input type="password" id="input-api-key" placeholder="Enter your Gemini API Key..." />
+            <button id="btn-toggle-key-visibility" class="text-button">Show</button>
+          </div>
+          <p class="help-text">Stored securely in your local browser storage.</p>
+        </div>
+        <div class="form-group">
+          <label for="select-model">Model Selection</label>
+          <select id="select-model">
+            <option value="gemini-2.5-flash">gemini-2.5-flash (Recommended)</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro (High intelligence)</option>
+            <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+            <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+            <option value="custom">-- Custom Model ID --</option>
+          </select>
+        </div>
+        <div class="form-group" id="custom-model-group" style="display: none;">
+          <label for="input-custom-model">Custom Model ID</label>
+          <input type="text" id="input-custom-model" placeholder="e.g. gemini-3.5-flash" value="gemini-2.5-flash" />
+        </div>
+        <div class="settings-actions">
+          <button id="btn-save-settings" class="primary-button">Save Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat Message Log -->
+    <main class="chat-log" id="chat-log">
+      <!-- Starter/Welcome Screen -->
+      <div id="welcome-screen" class="welcome-screen">
+        <div class="welcome-icon">💬</div>
+        <h2>Welcome to Gemini Companion</h2>
+        <p>Talk to Gemini directly from any browser tab! Capture screens, upload files, and chat seamlessly.</p>
+        
+        <div class="preset-suggestions">
+          <button class="preset-btn" data-prompt="Summarize this web page for me.">
+            📝 Summarize this page
+          </button>
+          <button class="preset-btn" data-prompt="What are the key takeaways from the content on this website?">
+            💡 Key takeaways
+          </button>
+          <button class="preset-btn" data-prompt="Can you explain the main concepts discussed here in simple terms?">
+            🧠 Explain main concepts
+          </button>
+        </div>
+
+        <div class="status-warning" id="welcome-key-warning">
+          ⚠️ Please click the gear icon (⚙️) above to configure your Gemini API Key.
+        </div>
+      </div>
+    </main>
+
+    <!-- Attached Asset Area -->
+    <div id="attachment-preview" class="attachment-preview hidden">
+      <div class="preview-card">
+        <span class="attachment-icon" id="attachment-type-icon">📎</span>
+        <div class="attachment-details">
+          <span class="attachment-name" id="attachment-name">screenshot.png</span>
+          <span class="attachment-size" id="attachment-size">Page Capture</span>
+        </div>
+        <button id="btn-remove-attachment" class="remove-button" title="Remove attachment">×</button>
+      </div>
+    </div>
+
+    <!-- Interactive Input Panel -->
+    <footer class="app-input-panel">
+      <!-- Input Action Dropdown/Menu -->
+      <div class="prompt-controls">
+        <div class="relative-container">
+          <button id="btn-plus" class="plus-button" title="Attach file or screenshot">
+            ＋
+          </button>
+          
+          <!-- Dropdown Menu -->
+          <div id="plus-menu" class="plus-menu hidden">
+            <button id="menu-upload-file" class="menu-item">
+              <span class="icon">📁</span> Upload File
+            </button>
+            <button id="menu-capture-page" class="menu-item">
+              <span class="icon">📸</span> Capture Tab (Screenshot + DOM)
+            </button>
+          </div>
+        </div>
+
+        <!-- Hidden input elements -->
+        <input type="file" id="hidden-file-input" style="display: none;" />
+
+        <textarea id="prompt-input" placeholder="Type a message or query page context..." rows="1"></textarea>
+
+        <button id="btn-send" class="send-button" title="Send message">
+          <svg viewBox="0 0 24 24" class="send-icon">
+            <path d="M2,21L23,12L2,3V10L17,12L2,14V21Z" />
+          </svg>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

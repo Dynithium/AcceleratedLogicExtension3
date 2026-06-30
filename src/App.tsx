@@ -1,0 +1,1534 @@
+import React, { useState, useEffect, useRef } from "react";
+import { 
+  Settings, 
+  Sparkles, 
+  Puzzle, 
+  HelpCircle, 
+  FolderOpen, 
+  FileCode, 
+  ArrowRight, 
+  CheckCircle2, 
+  Copy, 
+  Paperclip, 
+  Send, 
+  Plus, 
+  X, 
+  Eye, 
+  EyeOff,
+  Laptop,
+  Check
+} from "lucide-react";
+
+// Code listings to display in the live Explorer
+const MANIFEST_CODE = `{
+  "manifest_version": 3,
+  "name": "Gemini Web Companion",
+  "version": "1.0.0",
+  "description": "Talk to Gemini models directly from your browser. Upload files, capture screenshots, and query current page DOM context.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.svg"
+  },
+  "icons": {
+    "16": "icon.svg",
+    "32": "icon.svg",
+    "48": "icon.svg",
+    "128": "icon.svg"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}`;
+
+const BACKGROUND_CODE = `// Gemini Web Companion - Background Script
+// This background worker listens for installation events.
+
+chrome.runtime.onInstalled.addListener(() => {
+  console.log("Gemini Web Companion Chrome Extension installed successfully.");
+});`;
+
+const POPUP_HTML_CODE = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Gemini Web Companion</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header Section -->
+    <header class="app-header">
+      <div class="logo-area">
+        <span class="sparkle-icon">✨</span>
+        <h1 class="title">Gemini Companion</h1>
+      </div>
+      <button id="btn-settings" class="icon-button" title="Configure Settings">⚙️</button>
+    </header>
+
+    <!-- Settings Pane (Collapsible) -->
+    <div id="settings-pane" class="settings-pane collapsed">
+      <div class="settings-header">
+        <h3>Configuration</h3>
+      </div>
+      <div class="settings-body">
+        <div class="form-group">
+          <label for="input-api-key">Gemini API Key</label>
+          <div class="input-with-action">
+            <input type="password" id="input-api-key" placeholder="Enter your Gemini API Key..." />
+            <button id="btn-toggle-key-visibility" class="text-button">Show</button>
+          </div>
+          <p class="help-text">Stored securely in your local browser storage.</p>
+        </div>
+        <div class="form-group">
+          <label for="select-model">Model Selection</label>
+          <select id="select-model">
+            <option value="gemini-2.5-flash">gemini-2.5-flash (Recommended)</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro (High intelligence)</option>
+            <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+            <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+            <option value="custom">-- Custom Model ID --</option>
+          </select>
+        </div>
+        <div class="form-group" id="custom-model-group" style="display: none;">
+          <label for="input-custom-model">Custom Model ID</label>
+          <input type="text" id="input-custom-model" placeholder="e.g. gemini-3.5-flash" />
+        </div>
+        <div class="settings-actions">
+          <button id="btn-save-settings" class="primary-button">Save Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat Message Log -->
+    <main class="chat-log" id="chat-log">
+      <!-- Starter/Welcome Screen -->
+      <div id="welcome-screen" class="welcome-screen">
+        <div class="welcome-icon">💬</div>
+        <h2>Welcome to Gemini Companion</h2>
+        <p>Talk to Gemini directly from any browser tab! Capture screens, upload files, and chat seamlessly.</p>
+        
+        <div class="preset-suggestions">
+          <button class="preset-btn" data-prompt="Summarize this web page for me.">📝 Summarize this page</button>
+          <button class="preset-btn" data-prompt="What are the key takeaways from this website?">💡 Key takeaways</button>
+          <button class="preset-btn" data-prompt="Explain the main concepts here in simple terms.">🧠 Explain main concepts</button>
+        </div>
+
+        <div class="status-warning" id="welcome-key-warning">
+          ⚠️ Please click the gear icon (⚙️) above to configure your Gemini API Key.
+        </div>
+      </div>
+    </main>
+
+    <!-- Attached Asset Area -->
+    <div id="attachment-preview" class="attachment-preview hidden">
+      <div class="preview-card">
+        <span class="attachment-icon" id="attachment-type-icon">📎</span>
+        <div class="attachment-details">
+          <span class="attachment-name" id="attachment-name">screenshot.png</span>
+          <span class="attachment-size" id="attachment-size">Page Capture</span>
+        </div>
+        <button id="btn-remove-attachment" class="remove-button">×</button>
+      </div>
+    </div>
+
+    <!-- Interactive Input Panel -->
+    <footer class="app-input-panel">
+      <div class="prompt-controls">
+        <div class="relative-container">
+          <button id="btn-plus" class="plus-button">＋</button>
+          
+          <div id="plus-menu" class="plus-menu hidden">
+            <button id="menu-upload-file" class="menu-item"><span class="icon">📁</span> Upload File</button>
+            <button id="menu-capture-page" class="menu-item"><span class="icon">📸</span> Capture Tab (Screenshot + DOM)</button>
+          </div>
+        </div>
+
+        <input type="file" id="hidden-file-input" style="display: none;" />
+        <textarea id="prompt-input" placeholder="Type a message or query page context..." rows="1"></textarea>
+        <button id="btn-send" class="send-button">
+          <svg viewBox="0 0 24 24" class="send-icon"><path d="M2,21L23,12L2,3V10L17,12L2,14V21Z" /></svg>
+        </button>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>`;
+
+const POPUP_CSS_CODE = `/* Google Gemini Web Companion - Style Sheet */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+  width: 420px;
+  height: 580px;
+  background-color: #0f172a;
+  color: #f1f5f9;
+  overflow: hidden;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background-color: #1e293b;
+  border-bottom: 1px solid #334155;
+  z-index: 10;
+}
+
+.logo-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sparkle-icon {
+  font-size: 1.25rem;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.icon-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #94a3b8;
+  font-size: 1.2rem;
+  padding: 4px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.icon-button:hover {
+  background-color: #334155;
+  color: #f1f5f9;
+}
+
+.settings-pane {
+  background-color: #1e293b;
+  border-bottom: 1px solid #334155;
+  max-height: 250px;
+  overflow-y: auto;
+  transition: all 0.3s ease-out;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-pane.collapsed {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-bottom-width: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.settings-header h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-group label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.form-group input, .form-group select {
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  color: #f1f5f9;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+}
+
+.input-with-action {
+  display: flex;
+  gap: 8px;
+}
+
+.text-button {
+  background-color: #334155;
+  border: none;
+  color: #cbd5e1;
+  font-size: 0.75rem;
+  padding: 0 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.primary-button {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background-color: #0f172a;
+}
+
+.welcome-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 16px;
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+.welcome-icon {
+  font-size: 3rem;
+  margin-bottom: 12px;
+}
+
+.preset-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 16px;
+}
+
+.preset-btn {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.preset-btn:hover {
+  background-color: #334155;
+  color: #f8fafc;
+}
+
+.status-warning {
+  background-color: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #f59e0b;
+  font-size: 0.75rem;
+  padding: 8px;
+  border-radius: 6px;
+  margin-top: 12px;
+}
+
+.message-bubble {
+  display: flex;
+  flex-direction: column;
+  max-width: 85%;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.message-bubble.user {
+  align-self: flex-end;
+  background-color: #2563eb;
+  color: white;
+  border-bottom-right-radius: 2px;
+}
+
+.message-bubble.assistant {
+  align-self: flex-start;
+  background-color: #1e293b;
+  color: #cbd5e1;
+  border-bottom-left-radius: 2px;
+  border: 1px solid #334155;
+}
+
+.message-header {
+  font-size: 0.7rem;
+  font-weight: 500;
+  margin-bottom: 4px;
+  opacity: 0.8;
+  display: flex;
+  justify-content: space-between;
+}
+
+.bubble-attachment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  font-size: 0.75rem;
+}
+
+.bubble-attachment-thumbnail {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #334155;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.attachment-preview {
+  padding: 8px 16px;
+  background-color: #1e293b;
+  border-top: 1px solid #334155;
+  display: flex;
+}
+
+.attachment-preview.hidden {
+  display: none !important;
+}
+
+.preview-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 6px 12px;
+  width: 100%;
+}
+
+.app-input-panel {
+  padding: 12px 16px;
+  background-color: #1e293b;
+  border-top: 1px solid #334155;
+}
+
+.prompt-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.relative-container {
+  position: relative;
+}
+
+.plus-button {
+  background-color: #334155;
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  color: #f1f5f9;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.plus-menu {
+  position: absolute;
+  bottom: 44px;
+  left: 0;
+  background-color: #1e293b;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  width: 240px;
+  padding: 4px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+
+.plus-menu.hidden {
+  display: none !important;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  border: none;
+  color: #cbd5e1;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.menu-item:hover {
+  background-color: #334155;
+  color: #f8fafc;
+}
+
+#prompt-input {
+  flex: 1;
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #f1f5f9;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  outline: none;
+  resize: none;
+}
+
+.send-button {
+  background-color: #2563eb;
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.send-icon {
+  width: 18px;
+  height: 18px;
+  fill: #ffffff;
+}
+`;
+
+const POPUP_JS_CODE = `// Gemini Web Companion - Popup Controller
+document.addEventListener("DOMContentLoaded", () => {
+  const btnSettings = document.getElementById("btn-settings");
+  const settingsPane = document.getElementById("settings-pane");
+  const btnSaveSettings = document.getElementById("btn-save-settings");
+  const inputApiKey = document.getElementById("input-api-key");
+  const btnToggleKeyVisibility = document.getElementById("btn-toggle-key-visibility");
+  const selectModel = document.getElementById("select-model");
+  const customModelGroup = document.getElementById("custom-model-group");
+  const inputCustomModel = document.getElementById("input-custom-model");
+
+  const chatLog = document.getElementById("chat-log");
+  const welcomeScreen = document.getElementById("welcome-screen");
+  const welcomeKeyWarning = document.getElementById("welcome-key-warning");
+
+  const btnPlus = document.getElementById("btn-plus");
+  const plusMenu = document.getElementById("plus-menu");
+  const menuUploadFile = document.getElementById("menu-upload-file");
+  const menuCapturePage = document.getElementById("menu-capture-page");
+  const hiddenFileInput = document.getElementById("hidden-file-input");
+
+  const attachmentPreview = document.getElementById("attachment-preview");
+  const attachmentTypeIcon = document.getElementById("attachment-type-icon");
+  const attachmentNameElement = document.getElementById("attachment-name");
+  const attachmentSizeElement = document.getElementById("attachment-size");
+  const btnRemoveAttachment = document.getElementById("btn-remove-attachment");
+
+  const promptInput = document.getElementById("prompt-input");
+  const btnSend = document.getElementById("btn-send");
+
+  let apiKey = "";
+  let modelId = "gemini-2.5-flash";
+  let activeAttachment = null;
+  let chatHistory = [];
+
+  // Load Settings
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+    chrome.storage.local.get(["apiKey", "modelId", "customModelId", "chatHistory"], (result) => {
+      if (result.apiKey) {
+        apiKey = result.apiKey;
+        inputApiKey.value = apiKey;
+        welcomeKeyWarning.style.display = "none";
+      }
+      if (result.modelId) {
+        modelId = result.modelId;
+        selectModel.value = modelId;
+        if (modelId === "custom") {
+          customModelGroup.style.display = "block";
+          if (result.customModelId) inputCustomModel.value = result.customModelId;
+        }
+      }
+      if (result.chatHistory) {
+        chatHistory = result.chatHistory;
+        welcomeScreen.style.display = "none";
+        renderHistory();
+      }
+    });
+  }
+
+  btnSettings.addEventListener("click", () => settingsPane.classList.toggle("collapsed"));
+
+  btnToggleKeyVisibility.addEventListener("click", () => {
+    if (inputApiKey.type === "password") {
+      inputApiKey.type = "text";
+      btnToggleKeyVisibility.textContent = "Hide";
+    } else {
+      inputApiKey.type = "password";
+      btnToggleKeyVisibility.textContent = "Show";
+    }
+  });
+
+  selectModel.addEventListener("change", () => {
+    customModelGroup.style.display = selectModel.value === "custom" ? "block" : "none";
+  });
+
+  btnSaveSettings.addEventListener("click", () => {
+    apiKey = inputApiKey.value.trim();
+    let selectedVal = selectModel.value;
+    modelId = selectedVal === "custom" ? inputCustomModel.value.trim() : selectedVal;
+
+    chrome.storage.local.set({
+      apiKey,
+      modelId: selectedVal,
+      customModelId: inputCustomModel.value.trim()
+    }, () => {
+      settingsPane.classList.add("collapsed");
+      welcomeKeyWarning.style.display = apiKey ? "none" : "block";
+      showToast("Settings saved!");
+    });
+  });
+
+  document.querySelectorAll(".preset-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      promptInput.value = btn.getAttribute("data-prompt");
+      promptInput.focus();
+    });
+  });
+
+  btnPlus.addEventListener("click", (e) => {
+    e.stopPropagation();
+    plusMenu.classList.toggle("hidden");
+  });
+
+  document.addEventListener("click", () => plusMenu.classList.add("hidden"));
+
+  menuUploadFile.addEventListener("click", () => hiddenFileInput.click());
+
+  hiddenFileInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setAttachment({
+        name: file.name,
+        size: (file.size / 1024).toFixed(1) + " KB",
+        mimeType: file.type,
+        base64: event.target.result
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+
+  menuCapturePage.addEventListener("click", () => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (!tabs || tabs.length === 0) return;
+      const activeTab = tabs[0];
+      
+      chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: () => ({
+          title: document.title,
+          url: window.location.href,
+          text: document.body ? document.body.innerText.substring(0, 40000) : ""
+        })
+      }, (results) => {
+        let extractedDom = { title: activeTab.title, url: activeTab.url, text: "" };
+        if (results && results[0]) extractedDom = results[0].result;
+
+        chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 80 }, (screenshotUrl) => {
+          setAttachment({
+            name: \`Capture: \${extractedDom.title}\`,
+            size: "Webpage + DOM Context",
+            mimeType: "image/jpeg",
+            base64: screenshotUrl || "",
+            domContext: extractedDom
+          });
+          if (!promptInput.value.trim()) {
+            promptInput.value = "Summarize or explain this page.";
+          }
+        });
+      });
+    });
+  });
+
+  function setAttachment(obj) {
+    activeAttachment = obj;
+    attachmentNameElement.textContent = obj.name;
+    attachmentSizeElement.textContent = obj.size;
+    attachmentTypeIcon.textContent = obj.mimeType.startsWith("image/") ? "🖼️" : "📄";
+    attachmentPreview.classList.remove("hidden");
+  }
+
+  btnRemoveAttachment.addEventListener("click", () => {
+    activeAttachment = null;
+    attachmentPreview.classList.add("hidden");
+  });
+
+  btnSend.addEventListener("click", sendMessage);
+
+  async function sendMessage() {
+    const prompt = promptInput.value.trim();
+    if (!prompt && !activeAttachment) return;
+    if (!apiKey) {
+      showToast("Pasted API Key is required!");
+      return;
+    }
+
+    welcomeScreen.style.display = "none";
+    appendUserMessage(prompt, activeAttachment);
+
+    let userParts = [];
+    let finalPrompt = prompt;
+
+    if (activeAttachment) {
+      if (activeAttachment.domContext) {
+        finalPrompt = \`[Context URL: \${activeAttachment.domContext.url}]\\n\\nDOM content:\\n---\\n\${activeAttachment.domContext.text}\\n---\\n\\nUser question: \${prompt || "Explain page"}\`;
+      }
+      userParts.push({
+        inlineData: {
+          mimeType: activeAttachment.mimeType,
+          data: activeAttachment.base64.split(",")[1]
+        }
+      });
+    }
+
+    userParts.push({ text: finalPrompt || "Analyze this context" });
+    chatHistory.push({ role: "user", parts: userParts });
+
+    const assistBubble = appendAssistantLoading();
+    
+    // Clear inputs
+    promptInput.value = "";
+    const currentAttach = activeAttachment;
+    activeAttachment = null;
+    attachmentPreview.classList.add("hidden");
+
+    try {
+      const url = \`https://generativelanguage.googleapis.com/v1beta/models/\${modelId}:generateContent?key=\${apiKey}\`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: chatHistory })
+      });
+
+      const resData = await response.json();
+      const text = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error(resData.error?.message || "Empty response");
+
+      assistBubble.querySelector(".loading-indicator").remove();
+      const txtDiv = document.createElement("div");
+      txtDiv.className = "bubble-text";
+      txtDiv.textContent = text;
+      assistBubble.appendChild(txtDiv);
+
+      chatHistory.push({ role: "model", parts: [{ text }] });
+      chrome.storage.local.set({ chatHistory });
+    } catch (e) {
+      assistBubble.querySelector(".loading-indicator").remove();
+      const errDiv = document.createElement("div");
+      errDiv.className = "bubble-text";
+      errDiv.style.color = "#ef4444";
+      errDiv.textContent = "Error: " + e.message;
+      assistBubble.appendChild(errDiv);
+      chatHistory.pop();
+    }
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  function appendUserMessage(p, attachment) {
+    const bubble = document.createElement("div");
+    bubble.className = "message-bubble user";
+    if (attachment) {
+      const att = document.createElement("div");
+      att.className = "bubble-attachment";
+      att.innerHTML = \`<span style="margin-right:6px">\${attachment.mimeType.startsWith("image/") ? "🖼️" : "📄"}</span> <span>\${attachment.name}</span>\`;
+      bubble.appendChild(att);
+    }
+    const txt = document.createElement("div");
+    txt.className = "bubble-text";
+    txt.textContent = p || "[Attachment]";
+    bubble.appendChild(txt);
+    chatLog.appendChild(bubble);
+  }
+
+  function appendAssistantLoading() {
+    const bubble = document.createElement("div");
+    bubble.className = "message-bubble assistant";
+    bubble.innerHTML = \`<div class="loading-indicator"><div class="spinner"></div> <span>Gemini is thinking...</span></div>\`;
+    chatLog.appendChild(bubble);
+    return bubble;
+  }
+
+  function renderHistory() {
+    chatHistory.forEach(msg => {
+      const b = document.createElement("div");
+      b.className = "message-bubble " + (msg.role === "user" ? "user" : "assistant");
+      msg.parts.forEach(part => {
+        if (part.text) {
+          const t = document.createElement("div");
+          t.className = "bubble-text";
+          t.textContent = part.text.includes("DOM content") ? "[Analyzed Webpage Context]" : part.text;
+          b.appendChild(t);
+        }
+      });
+      chatLog.appendChild(b);
+    });
+  }
+
+  function showToast(text) {
+    const t = document.createElement("div");
+    t.style = "position:absolute; bottom:80px; left:50%; transform:translateX(-50%); background:#1e293b; color:#fff; padding:6px 12px; border-radius:15px; font-size:0.75rem; z-index:99";
+    t.textContent = text;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2000);
+  }
+});`;
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState<"simulator" | "install" | "explorer">("simulator");
+  const [activeFile, setActiveFile] = useState<string>("manifest.json");
+  const [copied, setCopied] = useState<boolean>(false);
+
+  // Simulator States
+  const [simApiKey, setSimApiKey] = useState<string>("");
+  const [simModel, setSimModel] = useState<string>("gemini-2.5-flash");
+  const [simCustomModel, setSimCustomModel] = useState<string>("gemini-3.5-flash");
+  const [simInput, setSimInput] = useState<string>("");
+  const [simSettingsOpen, setSimSettingsOpen] = useState<boolean>(false);
+  const [simShowKey, setSimShowKey] = useState<boolean>(false);
+  const [simAttachment, setSimAttachment] = useState<any>(null);
+  const [simPlusMenuOpen, setSimPlusMenuOpen] = useState<boolean>(false);
+  const [simMessages, setSimMessages] = useState<Array<any>>([
+    {
+      id: 1,
+      role: "assistant",
+      text: "Hello! Paste your Gemini API key in the settings (⚙️) above to start. You can type prompts, upload files, or simulate taking page captures of this builder app!",
+    }
+  ]);
+  const [simLoading, setSimLoading] = useState<boolean>(false);
+  
+  const simChatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (simChatEndRef.current) {
+      simChatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [simMessages, simLoading]);
+
+  // Copy code utility
+  const handleCopy = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // File Upload simulation in simulator
+  const handleSimFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const sizeStr = (file.size / 1024).toFixed(1) + " KB";
+    const isImg = file.type.startsWith("image/");
+    
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      setSimAttachment({
+        name: file.name,
+        size: sizeStr,
+        type: file.type,
+        isImage: isImg,
+        base64: evt.target?.result as string
+      });
+    };
+    reader.readAsDataURL(file);
+    setSimPlusMenuOpen(false);
+  };
+
+  // Screen/DOM Capture simulation in simulator
+  const handleSimScreenCapture = () => {
+    setSimLoading(true);
+    setSimPlusMenuOpen(false);
+    
+    setTimeout(() => {
+      setSimAttachment({
+        name: "Capture: Gemini Extension Builder",
+        size: "Current Webpage (DOM + HTML)",
+        type: "image/jpeg",
+        isImage: true,
+        base64: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80",
+        domContext: {
+          title: "Gemini Extension Builder",
+          url: "https://gemini-extension-builder.ai.studio",
+          text: "Gemini Extension Builder is an advanced workbench to package custom Manifest V3 extensions. The app facilitates in-browser compilation of manifest.json, popup.html, popup.css, and popup.js into a packed ZIP folder. Built on June 2026, it uses React, Tailwind v4 and local JSZip compiler."
+        }
+      });
+      setSimInput("Summarize the captured text of this builder webpage.");
+      setSimLoading(false);
+    }, 800);
+  };
+
+  // Send message in simulator
+  const handleSimSend = async () => {
+    if (!simInput.trim() && !simAttachment) return;
+
+    const userMsgText = simInput;
+    const currentAttach = simAttachment;
+
+    const userMsg = {
+      id: Date.now(),
+      role: "user",
+      text: userMsgText || "[Sent Attachment]",
+      attachment: currentAttach
+    };
+
+    setSimMessages((prev) => [...prev, userMsg]);
+    setSimInput("");
+    setSimAttachment(null);
+    setSimLoading(true);
+
+    try {
+      const activeModelId = simModel === "custom" ? simCustomModel : simModel;
+
+      if (simApiKey) {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModelId}:generateContent?key=${simApiKey}`;
+        
+        let contentsParts = [];
+        if (currentAttach) {
+          let promptQuery = userMsgText;
+          if (currentAttach.domContext) {
+            promptQuery = `[Captured Webpage Context URL: ${currentAttach.domContext.url}]\n\nDOM content:\n---\n${currentAttach.domContext.text}\n---\n\nUser Question: ${userMsgText || "Analyze this webpage"}`;
+          }
+
+          if (currentAttach.base64 && currentAttach.base64.startsWith("data:")) {
+            contentsParts.push({
+              inlineData: {
+                mimeType: currentAttach.type,
+                data: currentAttach.base64.split(",")[1]
+              }
+            });
+          }
+          contentsParts.push({ text: promptQuery || "Analyze attachment" });
+        } else {
+          contentsParts.push({ text: userMsgText });
+        }
+
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ role: "user", parts: contentsParts }] })
+        });
+
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error?.message || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        setSimMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now() + 1,
+            role: "assistant",
+            text: responseText || "Empty model response. Please check your query or API parameters."
+          }
+        ]);
+      } else {
+        setTimeout(() => {
+          let mockResponse = "";
+          if (currentAttach && currentAttach.domContext) {
+            mockResponse = `🔮 **[SIMULATED GEMINI RESPONSE]**\n\nI successfully analyzed the DOM content and screenshot you captured!\n\n**Website Analysis Summary:**\n- **Page Title:** ${currentAttach.domContext.title}\n- **Source URL:** ${currentAttach.domContext.url}\n\n**Identified Page Content:**\n"${currentAttach.domContext.text.substring(0, 150)}..."\n\n**How to Run Live Requests:**\nIf you paste your real API key into the simulator's settings tab (click ⚙️ above), I will make a live request to the Google GenAI endpoints to prove how the model parses the website structure!`;
+          } else if (currentAttach) {
+            mockResponse = `🔮 **[SIMULATED GEMINI RESPONSE]**\n\nI successfully processed your uploaded file **"${currentAttach.name}"** (${currentAttach.size}).\n\nTo run real visual image queries and receive actual text generations, paste your real Gemini API key into the simulator settings panel (⚙️) above! Once pasted, the simulator executes direct, serverless API calls to **${activeModelId}** from your browser!`;
+          } else {
+            mockResponse = `🔮 **[SIMULATED GEMINI RESPONSE]**\n\nI received your query: *"${userMsgText}"*\n\n**How this works:**\nThis simulator mimics the exact behavior of the Chrome Extension you will load. To test real Gemini capabilities directly in this preview:\n1. Click the gear icon (**⚙️**) inside this phone mock-up.\n2. Paste your Gemini API key from Google AI Studio.\n3. Type any question, and the simulator will connect directly to **${activeModelId}** for a fully responsive, real-time conversation!\n\nTo install this tool directly into your Chrome browser, check out the **Installation Guide** tab!`;
+          }
+
+          setSimMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now() + 1,
+              role: "assistant",
+              text: mockResponse
+            }
+          ]);
+        }, 1200);
+      }
+    } catch (e: any) {
+      setSimMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + 1,
+          role: "assistant",
+          text: `❌ **API Connection Error:** ${e.message || "Could not query Gemini API."}\n\nMake sure your pasted API Key is valid and that you have unrestricted network access to \`generativelanguage.googleapis.com\`.`
+        }
+      ]);
+    } finally {
+      setSimLoading(false);
+    }
+  };
+
+  const getFileCode = () => {
+    switch (activeFile) {
+      case "manifest.json": return MANIFEST_CODE;
+      case "popup.html": return POPUP_HTML_CODE;
+      case "popup.css": return POPUP_CSS_CODE;
+      case "popup.js": return POPUP_JS_CODE;
+      case "background.js": return BACKGROUND_CODE;
+      default: return "";
+    }
+  };
+
+  const getFileDesc = () => {
+    switch (activeFile) {
+      case "manifest.json":
+        return "Declares the chrome extension's permissions, Manifest V3 schemas, icons, and background workers.";
+      case "popup.html":
+        return "Defines the structures, panels, and forms inside the collapsible extension widget.";
+      case "popup.css":
+        return "Styles the visual layout, custom scrollbar, glow-effects, and chat bubble systems with modern dark values.";
+      case "popup.js":
+        return "Drives settings synchronization in chrome storage, file serialization to base64, tab captures, and Gemini endpoints.";
+      case "background.js":
+        return "A lightweight Manifest V3 background service worker to initialize local state configurations.";
+      default:
+        return "";
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased pb-20">
+      {/* Background Decorative Gradients */}
+      <div className="absolute top-0 left-0 w-full h-[500px] bg-gradient-to-b from-blue-900/15 via-violet-900/5 to-transparent pointer-events-none -z-10" />
+      <div className="absolute top-20 right-10 w-96 h-96 bg-blue-500/5 blur-3xl pointer-events-none -z-10" />
+      <div className="absolute top-80 left-10 w-96 h-96 bg-violet-500/5 blur-3xl pointer-events-none -z-10" />
+
+      {/* Hero Header Section */}
+      <header className="max-w-6xl mx-auto px-6 pt-12 pb-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 border-b border-slate-800 pb-8">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wider uppercase bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                Manifest V3 Compliant
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wider uppercase bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                Chrome Extension Ready
+              </span>
+            </div>
+            <h1 className="font-display text-3xl md:text-4xl font-bold tracking-tight text-white flex items-center gap-2">
+              <Sparkles className="w-8 h-8 text-blue-400 animate-pulse" />
+              Gemini Browser Extension
+            </h1>
+            <p className="mt-2 text-slate-400 max-w-3xl text-sm md:text-base leading-relaxed">
+              This repository contains the completed, fully built Chrome Extension! All of the files (including <code className="text-slate-200 bg-slate-800 px-1 py-0.5 rounded text-xs">manifest.json</code>, <code className="text-slate-200 bg-slate-800 px-1 py-0.5 rounded text-xs">popup.html</code>, <code className="text-slate-200 bg-slate-800 px-1 py-0.5 rounded text-xs">popup.js</code>, and <code className="text-slate-200 bg-slate-800 px-1 py-0.5 rounded text-xs">icon.svg</code>) exist directly in the root folder of this codebase. 
+            </p>
+          </div>
+        </div>
+
+        {/* Highlighted Warning of direct usage */}
+        <div className="mt-6 p-5 rounded-2xl bg-gradient-to-r from-blue-500/10 to-violet-500/10 border border-blue-500/20 text-slate-300 text-sm flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+          <div className="flex gap-3 items-start">
+            <span className="text-2xl mt-0.5">📥</span>
+            <div>
+              <h3 className="text-white font-semibold">How to Download and Load This Extension:</h3>
+              <p className="text-slate-400 text-xs mt-1">
+                Simply click the <strong>AI Studio export menu</strong> in the top-right corner, select <strong>Export to ZIP</strong> (or export to GitHub), extract the downloaded ZIP folder on your computer, and load the root directory directly in Chrome! No building or extra command tools needed.
+              </p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Container */}
+      <main className="max-w-6xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        
+        {/* Left Side: Navigation Tabs and Worksheets */}
+        <section className="lg:col-span-7 space-y-6">
+          
+          {/* Navigation Controls */}
+          <div className="flex items-center bg-slate-900/60 p-1 border border-slate-800 rounded-xl">
+            <button
+              onClick={() => setActiveTab("simulator")}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition ${
+                activeTab === "simulator"
+                  ? "bg-slate-800 text-white border-b border-blue-500/30"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Laptop className="w-4 h-4" />
+              Live Interactive Simulator
+            </button>
+            <button
+              onClick={() => setActiveTab("install")}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition ${
+                activeTab === "install"
+                  ? "bg-slate-800 text-white border-b border-blue-500/30"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <HelpCircle className="w-4 h-4" />
+              Installation Steps
+            </button>
+            <button
+              onClick={() => setActiveTab("explorer")}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition ${
+                activeTab === "explorer"
+                  ? "bg-slate-800 text-white border-b border-blue-500/30"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <FileCode className="w-4 h-4" />
+              Inspect Source Code
+            </button>
+          </div>
+
+          {/* TAB CONTENT: SIMULATOR EXPLANATION */}
+          {activeTab === "simulator" && (
+            <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 space-y-4">
+              <h3 className="font-display text-lg font-semibold text-white flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-blue-400" />
+                Try the Live Extension Mockup!
+              </h3>
+              <p className="text-slate-300 text-sm leading-relaxed">
+                Interact with the phone shell on the right. It operates exactly like your downloaded Chrome Extension will:
+              </p>
+              <ul className="space-y-3.5 text-slate-400 text-sm pl-1">
+                <li className="flex gap-2 items-start">
+                  <span className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center text-xs shrink-0 mt-0.5">1</span>
+                  <span><strong>Config Settings (⚙️):</strong> Click the gear icon inside the mockup to paste your <strong>Gemini API key</strong> and select a model.</span>
+                </li>
+                <li className="flex gap-2 items-start">
+                  <span className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center text-xs shrink-0 mt-0.5">2</span>
+                  <span><strong>Attach Documents & Content (+):</strong> Click the plus icon to upload documents or simulate a visual tab capture along with the webpage DOM text contents!</span>
+                </li>
+                <li className="flex gap-2 items-start">
+                  <span className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center text-xs shrink-0 mt-0.5">3</span>
+                  <span><strong>No API Key yet?</strong> No problem! Send a query anyway, and the simulator will display a detailed explanation of how it parses page hierarchies and forwards payload contexts to Gemini.</span>
+                </li>
+              </ul>
+              <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/15 text-blue-300 text-xs leading-relaxed">
+                💡 <strong>Privacy First:</strong> Your custom API key is stored purely locally inside your browser's context or extension storage. No third-party relays, servers, or intermediaries ever see your credentials.
+              </div>
+            </div>
+          )}
+
+          {/* TAB CONTENT: INSTALLATION GUIDE */}
+          {activeTab === "install" && (
+            <div className="space-y-4">
+              <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6">
+                <h3 className="font-display text-lg font-semibold text-white flex items-center gap-2 mb-4">
+                  <Puzzle className="w-5 h-5 text-blue-400" />
+                  Interactive Extension Installation Guide
+                </h3>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  
+                  {/* Step 1 */}
+                  <div className="bg-slate-900/60 p-4 border border-slate-800 rounded-xl space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Step 1</span>
+                      <span className="text-xs font-mono text-slate-500">ZIP</span>
+                    </div>
+                    <h4 className="font-semibold text-white text-sm">Export ZIP from AI Studio</h4>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Click the settings menu in the top-right corner of Google AI Studio and download this workspace as a compressed ZIP.
+                    </p>
+                  </div>
+
+                  {/* Step 2 */}
+                  <div className="bg-slate-900/60 p-4 border border-slate-800 rounded-xl space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Step 2</span>
+                      <FolderOpen className="w-4 h-4 text-slate-500" />
+                    </div>
+                    <h4 className="font-semibold text-white text-sm">Extract Files</h4>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Locate the downloaded `.zip` file on your computer and extract (unzip) it into a dedicated folder on your drive.
+                    </p>
+                  </div>
+
+                  {/* Step 3 */}
+                  <div className="bg-slate-900/60 p-4 border border-slate-800 rounded-xl space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Step 3</span>
+                      <span className="text-xs font-mono text-slate-500">chrome://</span>
+                    </div>
+                    <h4 className="font-semibold text-white text-sm">Open Extensions</h4>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Launch your Google Chrome browser, type <code className="text-blue-300 font-mono text-xs select-all">chrome://extensions</code> in the address bar, and press Enter.
+                    </p>
+                  </div>
+
+                  {/* Step 4 */}
+                  <div className="bg-slate-900/60 p-4 border border-slate-800 rounded-xl space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Step 4</span>
+                      <div className="w-5 h-3 bg-blue-500 rounded-full relative"><div className="w-2.5 h-2.5 bg-white rounded-full absolute right-0.5 top-0.5" /></div>
+                    </div>
+                    <h4 className="font-semibold text-white text-sm">Developer Mode</h4>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      In the top-right corner of the Extensions page, switch the <strong>"Developer Mode"</strong> toggle to the **ON** position.
+                    </p>
+                  </div>
+
+                  {/* Step 5 */}
+                  <div className="bg-slate-900/60 p-4 border border-slate-800 rounded-xl space-y-2 col-span-1 sm:col-span-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Step 5</span>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    </div>
+                    <h4 className="font-semibold text-white text-sm">Click "Load Unpacked"</h4>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Click the <strong>"Load unpacked"</strong> button in the top-left menu bar. Select the root folder where you extracted the project. Chrome will install it immediately!
+                    </p>
+                  </div>
+
+                </div>
+
+                <div className="mt-4 p-4 rounded-xl bg-violet-500/5 border border-violet-500/15 text-slate-300 text-xs flex gap-3 items-start">
+                  <span className="text-lg">📌</span>
+                  <p className="leading-relaxed">
+                    <strong>Quick Tip:</strong> Click the puzzle-piece icon on your Chrome toolbar, find <strong>"Gemini Web Companion"</strong>, and click the pin icon. This places the glowing sparkle button directly in your browser bar for single-click access!
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB CONTENT: CODE EXPLORER */}
+          {activeTab === "explorer" && (
+            <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <h3 className="font-display text-lg font-semibold text-white flex items-center gap-2">
+                  <FileCode className="w-5 h-5 text-blue-400" />
+                  Code Explorer
+                </h3>
+                <button
+                  onClick={() => handleCopy(getFileCode())}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-200 transition cursor-pointer"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied ? "Copied" : "Copy Code"}
+                </button>
+              </div>
+
+              {/* File selection Tabs */}
+              <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-3">
+                {["manifest.json", "popup.html", "popup.css", "popup.js", "background.js"].map((fileName) => (
+                  <button
+                    key={fileName}
+                    onClick={() => setActiveFile(fileName)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-mono transition cursor-pointer ${
+                      activeFile === fileName
+                        ? "bg-blue-600/15 text-blue-400 border border-blue-500/30"
+                        : "bg-slate-900/40 text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    {fileName}
+                  </button>
+                ))}
+              </div>
+
+              {/* File Info */}
+              <p className="text-xs text-slate-400 leading-relaxed italic">
+                {getFileDesc()}
+              </p>
+
+              {/* Code Panel */}
+              <div className="relative overflow-hidden rounded-xl border border-slate-800 bg-slate-950 p-4">
+                <pre className="overflow-x-auto text-[11px] font-mono leading-relaxed text-slate-300 max-h-[400px]">
+                  <code>{getFileCode()}</code>
+                </pre>
+              </div>
+            </div>
+          )}
+
+        </section>
+
+        {/* Right Side: Extension Screen Simulator Shell */}
+        <section className="lg:col-span-5 flex justify-center">
+          <div className="w-[360px] bg-slate-900 border-4 border-slate-800 rounded-[36px] shadow-2xl overflow-hidden flex flex-col h-[520px] relative">
+            
+            {/* Camera speaker bezel indicator */}
+            <div className="h-6 bg-slate-900 flex justify-center items-center gap-1.5 shrink-0">
+              <div className="w-12 h-3.5 bg-slate-950 rounded-full" />
+              <div className="w-2 h-2 bg-slate-950 rounded-full" />
+            </div>
+
+            {/* Simulated Extension Header */}
+            <header className="flex justify-between items-center px-4 py-2.5 bg-slate-800 border-b border-slate-700 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-blue-400 text-sm">✨</span>
+                <span className="text-xs font-semibold text-slate-200">Gemini Companion</span>
+              </div>
+              <button
+                onClick={() => setSimSettingsOpen(!simSettingsOpen)}
+                className={`p-1 rounded text-slate-400 hover:text-slate-100 transition cursor-pointer ${simSettingsOpen ? "bg-slate-700 text-white" : ""}`}
+                title="Settings"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            </header>
+
+            {/* Simulated Settings Window */}
+            {simSettingsOpen && (
+              <div className="absolute top-[50px] left-0 w-full bg-slate-800 border-b border-slate-700 px-4 py-3 z-30 space-y-2.5 shadow-xl">
+                <div className="flex justify-between items-center border-b border-slate-700 pb-1.5">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Settings Config</h4>
+                  <button onClick={() => setSimSettingsOpen(false)} className="text-slate-400 hover:text-slate-200"><X className="w-3.5 h-3.5" /></button>
+                </div>
+                
+                <div className="space-y-2">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-medium text-slate-400">Gemini API Key</label>
+                    <div className="flex gap-1.5">
+                      <input
+                        type={simShowKey ? "text" : "password"}
+                        value={simApiKey}
+                        onChange={(e) => setSimApiKey(e.target.value)}
+                        placeholder="Paste your Gemini API Key..."
+                        className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100 flex-1 outline-none focus:border-blue-500"
+                      />
+                      <button
+                        onClick={() => setSimShowKey(!simShowKey)}
+                        className="p-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300 text-[10px]"
+                      >
+                        {simShowKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-medium text-slate-400">Select Model</label>
+                    <select
+                      value={simModel}
+                      onChange={(e) => setSimModel(e.target.value)}
+                      className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100 outline-none focus:border-blue-500"
+                    >
+                      <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                      <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                      <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                      <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                      <option value="custom">-- Custom Model --</option>
+                    </select>
+                  </div>
+
+                  {simModel === "custom" && (
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] font-medium text-slate-400">Custom Model ID</label>
+                      <input
+                        type="text"
+                        value={simCustomModel}
+                        onChange={(e) => setSimCustomModel(e.target.value)}
+                        placeholder="e.g. gemini-3.5-flash"
+                        className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100 outline-none"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    onClick={() => {
+                      setSimSettingsOpen(false);
+                      setSimMessages((prev) => [
+                        ...prev,
+                        {
+                          id: Date.now(),
+                          role: "assistant",
+                          text: simApiKey 
+                            ? "✅ API Key saved! You can now send real queries directly to Gemini models."
+                            : "⚠️ No API Key entered. Real connections are paused; falling back to simulated analysis modes."
+                        }
+                      ]);
+                    }}
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-medium rounded px-3 py-1 text-xs transition cursor-pointer"
+                  >
+                    Save settings
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Simulated Chat Feed Area */}
+            <main className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-950">
+              
+              {/* Alert Warning for empty API Key in Simulator */}
+              {!simApiKey && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400 text-[11px] leading-relaxed">
+                  ⚠️ <strong>Real Gemini request mode is paused.</strong> Enter your key via settings (⚙️) above for live model generation.
+                </div>
+              )}
+
+              {simMessages.map((msg) => (
+                <div
+                  key={msg.id}
+                  className={`flex flex-col max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
+                    msg.role === "user"
+                      ? "bg-blue-600 text-white self-end rounded-br-none"
+                      : "bg-slate-800 text-slate-200 border border-slate-700/60 self-start rounded-bl-none"
+                  }`}
+                >
+                  {/* Rendering Simulated Attachment inside Bubble */}
+                  {msg.attachment && (
+                    <div className="mb-2 bg-slate-950/40 p-1.5 rounded-lg border border-white/5 flex items-center gap-1.5 text-[10px]">
+                      <span>{msg.attachment.isImage ? "🖼️" : "📄"}</span>
+                      <span className="truncate flex-1 font-medium">{msg.attachment.name}</span>
+                    </div>
+                  )}
+
+                  <p className="whitespace-pre-line">{msg.text}</p>
+                </div>
+              ))}
+
+              {simLoading && (
+                <div className="bg-slate-800 text-slate-300 border border-slate-700 rounded-xl px-3 py-2 text-xs self-start rounded-bl-none flex items-center gap-2 max-w-[80%]">
+                  <div className="w-3 h-3 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin" />
+                  <span className="animate-pulse">Gemini thinking...</span>
+                </div>
+              )}
+
+              <div ref={simChatEndRef} />
+            </main>
+
+            {/* Simulated Attachment Box */}
+            {simAttachment && (
+              <div className="px-3 py-2 bg-slate-800 border-t border-slate-700 flex items-center justify-between gap-2 shrink-0">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <span className="text-sm">{simAttachment.isImage ? "🖼️" : "📄"}</span>
+                  <div className="flex flex-col overflow-hidden text-[10px]">
+                    <span className="text-slate-200 font-medium truncate">{simAttachment.name}</span>
+                    <span className="text-slate-400 font-mono text-[8px]">{simAttachment.size}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSimAttachment(null)}
+                  className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-red-400 shrink-0"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* Simulated Input Area */}
+            <footer className="p-3 bg-slate-800 border-t border-slate-700 shrink-0 relative z-10">
+              <div className="flex items-center gap-2 relative">
+                
+                {/* Plus button trigger */}
+                <div className="relative">
+                  <button
+                    onClick={() => setSimPlusMenuOpen(!simPlusMenuOpen)}
+                    className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg hover:text-white transition cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+
+                  {/* Plus Options Popover */}
+                  {simPlusMenuOpen && (
+                    <div className="absolute bottom-11 left-0 bg-slate-800 border border-slate-700 rounded-lg shadow-xl w-[220px] p-1.5 flex flex-col z-40">
+                      <label className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-700 text-xs text-slate-300 hover:text-white cursor-pointer transition">
+                        <span>📁</span>
+                        <span>Upload Custom File</span>
+                        <input
+                          type="file"
+                          onChange={handleSimFileUpload}
+                          className="hidden"
+                        />
+                      </label>
+                      <button
+                        onClick={handleSimScreenCapture}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-700 text-xs text-slate-300 hover:text-white text-left transition cursor-pointer"
+                      >
+                        <span>📸</span>
+                        <span>Capture Screen + DOM</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Main simulated text bar */}
+                <input
+                  type="text"
+                  value={simInput}
+                  onChange={(e) => setSimInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSimSend();
+                  }}
+                  placeholder="Ask Gemini anything..."
+                  className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 flex-1 outline-none focus:border-blue-500"
+                />
+
+                <button
+                  onClick={handleSimSend}
+                  className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition shrink-0 cursor-pointer"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+
+              </div>
+            </footer>
+
+          </div>
+        </section>
+
+      </main>
+    </div>
+  );
+}

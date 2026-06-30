@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Gemini Web Companion",
+  "version": "1.0.0",
+  "description": "Talk to Gemini models directly from your browser. Upload files, capture screenshots, and query current page DOM context.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.svg"
+  },
+  "icons": {
+    "16": "icon.svg",
+    "32": "icon.svg",
+    "48": "icon.svg",
+    "128": "icon.svg"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
