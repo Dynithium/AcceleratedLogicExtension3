@@ -389,8 +389,8 @@ document.addEventListener("DOMContentLoaded", () => {
         activeModel = inputCustomModel.value.trim() || "gemini-2.5-flash";
       }
 
-      // Call Gemini API directly
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${apiKey}`;
+      // Call Gemini API directly with streamGenerateContent
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:streamGenerateContent?key=${apiKey}`;
       
       const payload = {
         contents: chatHistory
@@ -409,24 +409,90 @@ document.addEventListener("DOMContentLoaded", () => {
         throw new Error(errJson.error?.message || `API Error: ${response.status}`);
       }
 
-      const resData = await response.json();
-      const assistantText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (!assistantText) {
-        throw new Error("Empty response received from Gemini API.");
+      if (!response.body) {
+        throw new Error("ReadableStream not supported on this browser.");
       }
 
-      // Update Assistant Bubble with Text
-      loaderDiv.remove();
-      const textDiv = document.createElement("div");
-      textDiv.className = "bubble-text";
-      textDiv.textContent = assistantText;
-      assistantBubble.appendChild(textDiv);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let accumulatedText = "";
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
+
+        let b = 0;
+        while (b < buffer.length) {
+          const startIdx = buffer.indexOf('{', b);
+          if (startIdx === -1) {
+            break;
+          }
+
+          let bracketCount = 0;
+          let endIdx = -1;
+          let inString = false;
+          let escape = false;
+
+          for (let i = startIdx; i < buffer.length; i++) {
+            const char = buffer[i];
+            if (escape) {
+              escape = false;
+              continue;
+            }
+            if (char === '\\') {
+              escape = true;
+              continue;
+            }
+            if (char === '"') {
+              inString = !inString;
+              continue;
+            }
+            if (!inString) {
+              if (char === '{') {
+                bracketCount++;
+              } else if (char === '}') {
+                bracketCount--;
+                if (bracketCount === 0) {
+                  endIdx = i;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (endIdx !== -1) {
+            const jsonStr = buffer.substring(startIdx, endIdx + 1);
+            try {
+              const obj = JSON.parse(jsonStr);
+              const text = obj.candidates?.[0]?.content?.parts?.[0]?.text || "";
+              if (text) {
+                accumulatedText += text;
+                updateAssistantBubble(assistantBubble, loaderDiv, accumulatedText);
+                scrollToBottom();
+              }
+            } catch (e) {
+              console.warn("Could not parse JSON object in stream:", e);
+            }
+            b = endIdx + 1;
+          } else {
+            break;
+          }
+        }
+        buffer = buffer.substring(b);
+      }
+
+      if (!accumulatedText) {
+        throw new Error("No text content returned from the stream.");
+      }
 
       // Append assistant response to history list
       chatHistory.push({
         role: "model",
-        parts: [{ text: assistantText }]
+        parts: [{ text: accumulatedText }]
       });
 
       // Save history to local storage
@@ -436,7 +502,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     } catch (err) {
       console.error(err);
-      loaderDiv.remove();
+      if (loaderDiv && loaderDiv.parentNode === assistantBubble) {
+        loaderDiv.remove();
+      }
       
       const errorDiv = document.createElement("div");
       errorDiv.className = "bubble-text";
@@ -449,6 +517,104 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     scrollToBottom();
+  }
+
+  // Parses thinking blocks out of the text content
+  function parseThinkingAndContent(text) {
+    let thinking = "";
+    let content = text;
+    
+    const thinkingStartTag = "<thinking>";
+    const thinkingEndTag = "</thinking>";
+    
+    const startIndex = text.indexOf(thinkingStartTag);
+    if (startIndex !== -1) {
+      const endIndex = text.indexOf(thinkingEndTag);
+      if (endIndex !== -1) {
+        // Complete thinking block
+        thinking = text.substring(startIndex + thinkingStartTag.length, endIndex);
+        content = text.substring(0, startIndex) + text.substring(endIndex + thinkingEndTag.length);
+      } else {
+        // Thinking block is still open (streaming)
+        thinking = text.substring(startIndex + thinkingStartTag.length);
+        content = text.substring(0, startIndex);
+      }
+    }
+    
+    return {
+      thinking: thinking.trim(),
+      content: content.trim()
+    };
+  }
+
+  // Updates the assistant bubble with styled thinking and content blocks
+  function updateAssistantBubble(assistantBubble, loaderDiv, accumulatedText) {
+    if (loaderDiv && loaderDiv.parentNode === assistantBubble) {
+      loaderDiv.remove();
+    }
+
+    const parsed = parseThinkingAndContent(accumulatedText);
+
+    // 1. Handle Thinking Block
+    let thinkingBlock = assistantBubble.querySelector(".thinking-block");
+    if (parsed.thinking) {
+      if (!thinkingBlock) {
+        thinkingBlock = document.createElement("div");
+        thinkingBlock.className = "thinking-block expanded"; // Default to expanded during streaming
+        
+        const toggleBtn = document.createElement("button");
+        toggleBtn.className = "thinking-toggle-btn";
+        toggleBtn.innerHTML = `
+          <span class="thinking-header-left">
+            <span class="thinking-icon">🧠</span>
+            <span class="thinking-text">Thinking Process</span>
+          </span>
+          <span class="thinking-arrow">▼</span>
+        `;
+        
+        const contentDiv = document.createElement("div");
+        contentDiv.className = "thinking-content";
+        
+        thinkingBlock.appendChild(toggleBtn);
+        thinkingBlock.appendChild(contentDiv);
+        
+        toggleBtn.addEventListener("click", () => {
+          thinkingBlock.classList.toggle("collapsed");
+          thinkingBlock.classList.toggle("expanded");
+        });
+        
+        const header = assistantBubble.querySelector(".message-header");
+        if (header && header.nextSibling) {
+          assistantBubble.insertBefore(thinkingBlock, header.nextSibling);
+        } else {
+          assistantBubble.appendChild(thinkingBlock);
+        }
+      }
+      
+      const contentDiv = thinkingBlock.querySelector(".thinking-content");
+      if (contentDiv) {
+        contentDiv.textContent = parsed.thinking;
+      }
+    } else if (thinkingBlock) {
+      thinkingBlock.remove();
+    }
+
+    // 2. Handle Regular Content
+    let answerDiv = assistantBubble.querySelector(".bubble-answer");
+    if (!answerDiv) {
+      answerDiv = document.createElement("div");
+      answerDiv.className = "bubble-answer bubble-text";
+      assistantBubble.appendChild(answerDiv);
+    }
+    
+    answerDiv.textContent = parsed.content || (parsed.thinking ? "" : "...");
+    
+    // Auto-collapse thinking block when done thinking (when </thinking> is matched)
+    if (thinkingBlock && accumulatedText.includes("</thinking>") && !thinkingBlock.dataset.autoCollapsed) {
+      thinkingBlock.classList.add("collapsed");
+      thinkingBlock.classList.remove("expanded");
+      thinkingBlock.dataset.autoCollapsed = "true";
+    }
   }
 
   // Render chat history from local storage
@@ -465,10 +631,6 @@ document.addEventListener("DOMContentLoaded", () => {
       // Render parts
       msg.parts.forEach(part => {
         if (part.text) {
-          const body = document.createElement("div");
-          body.className = "bubble-text";
-          
-          // Truncate webpage DOM dumps in history rendering to keep clean
           let text = part.text;
           if (text.includes("DOM innerText Context")) {
             const index = text.indexOf("User Prompt:");
@@ -477,8 +639,48 @@ document.addEventListener("DOMContentLoaded", () => {
             }
           }
           
-          body.textContent = text;
-          bubble.appendChild(body);
+          if (msg.role === 'model') {
+            const parsed = parseThinkingAndContent(text);
+            
+            if (parsed.thinking) {
+              const thinkingBlock = document.createElement("div");
+              thinkingBlock.className = "thinking-block collapsed"; // Collapsed in history
+              
+              const toggleBtn = document.createElement("button");
+              toggleBtn.className = "thinking-toggle-btn";
+              toggleBtn.innerHTML = `
+                <span class="thinking-header-left">
+                  <span class="thinking-icon">🧠</span>
+                  <span class="thinking-text">Thinking Process</span>
+                </span>
+                <span class="thinking-arrow">▼</span>
+              `;
+              
+              const contentDiv = document.createElement("div");
+              contentDiv.className = "thinking-content";
+              contentDiv.textContent = parsed.thinking;
+              
+              thinkingBlock.appendChild(toggleBtn);
+              thinkingBlock.appendChild(contentDiv);
+              
+              toggleBtn.addEventListener("click", () => {
+                thinkingBlock.classList.toggle("collapsed");
+                thinkingBlock.classList.toggle("expanded");
+              });
+              
+              bubble.appendChild(thinkingBlock);
+            }
+            
+            const answerDiv = document.createElement("div");
+            answerDiv.className = "bubble-answer bubble-text";
+            answerDiv.textContent = parsed.content || "";
+            bubble.appendChild(answerDiv);
+          } else {
+            const body = document.createElement("div");
+            body.className = "bubble-text";
+            body.textContent = text;
+            bubble.appendChild(body);
+          }
         } else if (part.inlineData) {
           // Render attached thumbnail indicator in history bubble
           const attachDiv = document.createElement("div");

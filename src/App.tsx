@@ -16,7 +16,9 @@ import {
   Eye, 
   EyeOff,
   Laptop,
-  Check
+  Check,
+  RotateCw,
+  Globe
 } from "lucide-react";
 
 // Code listings to display in the live Explorer
@@ -26,6 +28,7 @@ const MANIFEST_CODE = `{
   "version": "1.0.0",
   "description": "Talk to Gemini models directly from your browser. Upload files, capture screenshots, and query current page DOM context.",
   "permissions": [
+    "sidePanel",
     "activeTab",
     "scripting",
     "storage"
@@ -34,8 +37,10 @@ const MANIFEST_CODE = `{
     "<all_urls>"
   ],
   "action": {
-    "default_popup": "popup.html",
     "default_icon": "icon.svg"
+  },
+  "side_panel": {
+    "default_path": "popup.html"
   },
   "icons": {
     "16": "icon.svg",
@@ -53,7 +58,12 @@ const BACKGROUND_CODE = `// Gemini Web Companion - Background Script
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("Gemini Web Companion Chrome Extension installed successfully.");
-});`;
+});
+
+// Enable opening the side panel on clicking the action icon
+chrome.sidePanel
+  .setPanelBehavior({ openPanelOnActionClick: true })
+  .catch((error) => console.error(error));`;
 
 const POPUP_HTML_CODE = `<!DOCTYPE html>
 <html>
@@ -172,8 +182,8 @@ const POPUP_CSS_CODE = `/* Google Gemini Web Companion - Style Sheet */
 }
 
 body {
-  width: 420px;
-  height: 580px;
+  width: 100%;
+  height: 100vh;
   background-color: #0f172a;
   color: #f1f5f9;
   overflow: hidden;
@@ -551,6 +561,78 @@ body {
   height: 18px;
   fill: #ffffff;
 }
+
+/* Collapsible Thinking Block Styling */
+.thinking-block {
+  margin-top: 6px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background-color: rgba(30, 41, 59, 0.4);
+  border: 1px dashed rgba(59, 130, 246, 0.25);
+  overflow: hidden;
+}
+
+.thinking-toggle-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background-color: rgba(59, 130, 246, 0.06);
+  border: none;
+  cursor: pointer;
+  color: #93c5fd;
+  font-size: 0.725rem;
+  font-weight: 500;
+  text-align: left;
+  outline: none;
+}
+
+.thinking-toggle-btn:hover {
+  background-color: rgba(59, 130, 246, 0.12);
+}
+
+.thinking-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.thinking-icon {
+  font-size: 0.8rem;
+  animation: pulse-slow 2s infinite ease-in-out;
+}
+
+.thinking-arrow {
+  transition: transform 0.2s ease;
+  font-size: 0.65rem;
+  color: #64748b;
+}
+
+.thinking-block.expanded .thinking-arrow {
+  transform: rotate(180deg);
+}
+
+.thinking-content {
+  padding: 8px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.725rem;
+  color: #94a3b8;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  border-top: 1px solid rgba(59, 130, 246, 0.12);
+  max-height: 130px;
+  overflow-y: auto;
+}
+
+.thinking-block.collapsed .thinking-content {
+  display: none;
+}
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
 `;
 
 const POPUP_JS_CODE = `// Gemini Web Companion - Popup Controller
@@ -760,27 +842,105 @@ document.addEventListener("DOMContentLoaded", () => {
     attachmentPreview.classList.add("hidden");
 
     try {
-      const url = \`https://generativelanguage.googleapis.com/v1beta/models/\${modelId}:generateContent?key=\${apiKey}\`;
+      const url = \`https://generativelanguage.googleapis.com/v1beta/models/\${modelId}:streamGenerateContent?key=\${apiKey}\`;
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contents: chatHistory })
       });
 
-      const resData = await response.json();
-      const text = resData.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) throw new Error(resData.error?.message || "Empty response");
+      if (!response.ok) {
+        const errJson = await response.json();
+        throw new Error(errJson.error?.message || \`API Error: \${response.status}\`);
+      }
 
-      assistBubble.querySelector(".loading-indicator").remove();
-      const txtDiv = document.createElement("div");
-      txtDiv.className = "bubble-text";
-      txtDiv.textContent = text;
-      assistBubble.appendChild(txtDiv);
+      if (!response.body) {
+        throw new Error("ReadableStream not supported.");
+      }
 
-      chatHistory.push({ role: "model", parts: [{ text }] });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let accumulatedText = "";
+      let buffer = "";
+
+      const loader = assistBubble.querySelector(".loading-indicator");
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
+
+        let b = 0;
+        while (b < buffer.length) {
+          const startIdx = buffer.indexOf('{', b);
+          if (startIdx === -1) {
+            break;
+          }
+
+          let bracketCount = 0;
+          let endIdx = -1;
+          let inString = false;
+          let escape = false;
+
+          for (let i = startIdx; i < buffer.length; i++) {
+            const char = buffer[i];
+            if (escape) {
+              escape = false;
+              continue;
+            }
+            if (char === '\\\\') {
+              escape = true;
+              continue;
+            }
+            if (char === '"') {
+              inString = !inString;
+              continue;
+            }
+            if (!inString) {
+              if (char === '{') {
+                bracketCount++;
+              } else if (char === '}') {
+                bracketCount--;
+                if (bracketCount === 0) {
+                  endIdx = i;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (endIdx !== -1) {
+            const jsonStr = buffer.substring(startIdx, endIdx + 1);
+            try {
+              const obj = JSON.parse(jsonStr);
+              const text = obj.candidates?.[0]?.content?.parts?.[0]?.text || "";
+              if (text) {
+                accumulatedText += text;
+                updateAssistantBubble(assistBubble, loader, accumulatedText);
+                chatLog.scrollTop = chatLog.scrollHeight;
+              }
+            } catch (e) {
+              console.warn("Could not parse JSON object in stream:", e);
+            }
+            b = endIdx + 1;
+          } else {
+            break;
+          }
+        }
+        buffer = buffer.substring(b);
+      }
+
+      if (!accumulatedText) {
+        throw new Error("No text content returned from the stream.");
+      }
+
+      chatHistory.push({ role: "model", parts: [{ text: accumulatedText }] });
       chrome.storage.local.set({ chatHistory });
     } catch (e) {
-      assistBubble.querySelector(".loading-indicator").remove();
+      const loader = assistBubble.querySelector(".loading-indicator");
+      if (loader) loader.remove();
       const errDiv = document.createElement("div");
       errDiv.className = "bubble-text";
       errDiv.style.color = "#ef4444";
@@ -789,6 +949,77 @@ document.addEventListener("DOMContentLoaded", () => {
       chatHistory.pop();
     }
     chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  function parseThinkingAndContent(text) {
+    let thinking = "";
+    let content = text;
+    const thinkingStartTag = "<thinking>";
+    const thinkingEndTag = "</thinking>";
+    const startIndex = text.indexOf(thinkingStartTag);
+    if (startIndex !== -1) {
+      const endIndex = text.indexOf(thinkingEndTag);
+      if (endIndex !== -1) {
+        thinking = text.substring(startIndex + thinkingStartTag.length, endIndex);
+        content = text.substring(0, startIndex) + text.substring(endIndex + thinkingEndTag.length);
+      } else {
+        thinking = text.substring(startIndex + thinkingStartTag.length);
+        content = text.substring(0, startIndex);
+      }
+    }
+    return { thinking: thinking.trim(), content: content.trim() };
+  }
+
+  function updateAssistantBubble(assistantBubble, loaderDiv, accumulatedText) {
+    if (loaderDiv && loaderDiv.parentNode === assistantBubble) {
+      loaderDiv.remove();
+    }
+    const parsed = parseThinkingAndContent(accumulatedText);
+    let thinkingBlock = assistantBubble.querySelector(".thinking-block");
+    if (parsed.thinking) {
+      if (!thinkingBlock) {
+        thinkingBlock = document.createElement("div");
+        thinkingBlock.className = "thinking-block expanded";
+        
+        const toggleBtn = document.createElement("button");
+        toggleBtn.className = "thinking-toggle-btn";
+        toggleBtn.innerHTML = \`
+          <span class="thinking-header-left">
+            <span class="thinking-icon">🧠</span>
+            <span class="thinking-text">Thinking Process</span>
+          </span>
+          <span class="thinking-arrow">▼</span>
+        \`;
+        
+        const contentDiv = document.createElement("div");
+        contentDiv.className = "thinking-content";
+        thinkingBlock.appendChild(toggleBtn);
+        thinkingBlock.appendChild(contentDiv);
+        
+        toggleBtn.addEventListener("click", () => {
+          thinkingBlock.classList.toggle("collapsed");
+          thinkingBlock.classList.toggle("expanded");
+        });
+        
+        assistantBubble.appendChild(thinkingBlock);
+      }
+      const contentDiv = thinkingBlock.querySelector(".thinking-content");
+      if (contentDiv) contentDiv.textContent = parsed.thinking;
+    }
+    
+    let answerDiv = assistantBubble.querySelector(".bubble-answer");
+    if (!answerDiv) {
+      answerDiv = document.createElement("div");
+      answerDiv.className = "bubble-answer bubble-text";
+      assistantBubble.appendChild(answerDiv);
+    }
+    answerDiv.textContent = parsed.content || (parsed.thinking ? "" : "...");
+    
+    if (thinkingBlock && accumulatedText.includes("</thinking>") && !thinkingBlock.dataset.autoCollapsed) {
+      thinkingBlock.classList.add("collapsed");
+      thinkingBlock.classList.remove("expanded");
+      thinkingBlock.dataset.autoCollapsed = "true";
+    }
   }
 
   function appendUserMessage(p, attachment) {
@@ -821,10 +1052,41 @@ document.addEventListener("DOMContentLoaded", () => {
       b.className = "message-bubble " + (msg.role === "user" ? "user" : "assistant");
       msg.parts.forEach(part => {
         if (part.text) {
-          const t = document.createElement("div");
-          t.className = "bubble-text";
-          t.textContent = part.text.includes("DOM content") ? "[Analyzed Webpage Context]" : part.text;
-          b.appendChild(t);
+          if (msg.role === "model") {
+            const parsed = parseThinkingAndContent(part.text);
+            if (parsed.thinking) {
+              const thinkingBlock = document.createElement("div");
+              thinkingBlock.className = "thinking-block collapsed";
+              const toggleBtn = document.createElement("button");
+              toggleBtn.className = "thinking-toggle-btn";
+              toggleBtn.innerHTML = \`
+                <span class="thinking-header-left">
+                  <span class="thinking-icon">🧠</span>
+                  <span class="thinking-text">Thinking Process</span>
+                </span>
+                <span class="thinking-arrow">▼</span>
+              \`;
+              const contentDiv = document.createElement("div");
+              contentDiv.className = "thinking-content";
+              contentDiv.textContent = parsed.thinking;
+              thinkingBlock.appendChild(toggleBtn);
+              thinkingBlock.appendChild(contentDiv);
+              toggleBtn.addEventListener("click", () => {
+                thinkingBlock.classList.toggle("collapsed");
+                thinkingBlock.classList.toggle("expanded");
+              });
+              b.appendChild(thinkingBlock);
+            }
+            const answerDiv = document.createElement("div");
+            answerDiv.className = "bubble-answer bubble-text";
+            answerDiv.textContent = parsed.content || "";
+            b.appendChild(answerDiv);
+          } else {
+            const t = document.createElement("div");
+            t.className = "bubble-text";
+            t.textContent = part.text.includes("DOM content") ? "[Analyzed Webpage Context]" : part.text;
+            b.appendChild(t);
+          }
         }
       });
       chatLog.appendChild(b);
@@ -839,6 +1101,32 @@ document.addEventListener("DOMContentLoaded", () => {
     setTimeout(() => t.remove(), 2000);
   }
 });`;
+
+// Parses thinking blocks out of the text content inside React
+function parseThinkingAndContent(text: string) {
+  let thinking = "";
+  let content = text;
+  
+  const thinkingStartTag = "<thinking>";
+  const thinkingEndTag = "</thinking>";
+  
+  const startIndex = text.indexOf(thinkingStartTag);
+  if (startIndex !== -1) {
+    const endIndex = text.indexOf(thinkingEndTag);
+    if (endIndex !== -1) {
+      thinking = text.substring(startIndex + thinkingStartTag.length, endIndex);
+      content = text.substring(0, startIndex) + text.substring(endIndex + thinkingEndTag.length);
+    } else {
+      thinking = text.substring(startIndex + thinkingStartTag.length);
+      content = text.substring(0, startIndex);
+    }
+  }
+  
+  return {
+    thinking: thinking.trim(),
+    content: content.trim()
+  };
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<"simulator" | "install" | "explorer">("simulator");
@@ -940,13 +1228,15 @@ export default function App() {
     setSimMessages((prev) => [...prev, userMsg]);
     setSimInput("");
     setSimAttachment(null);
-    setSimLoading(true);
 
-    try {
-      const activeModelId = simModel === "custom" ? simCustomModel : simModel;
+    const activeModelId = simModel === "custom" ? simCustomModel : simModel;
 
-      if (simApiKey) {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModelId}:generateContent?key=${simApiKey}`;
+    if (simApiKey) {
+      setSimLoading(true);
+      const assistantMsgId = Date.now() + 1;
+
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModelId}:streamGenerateContent?key=${simApiKey}`;
         
         let contentsParts = [];
         if (currentAttach) {
@@ -979,49 +1269,168 @@ export default function App() {
           throw new Error(err.error?.message || `HTTP ${response.status}`);
         }
 
-        const data = await response.json();
-        const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!response.body) {
+          throw new Error("ReadableStream not supported on this browser.");
+        }
+
+        setSimLoading(false);
+
+        // Add empty message to populate
+        setSimMessages((prev) => [
+          ...prev,
+          {
+            id: assistantMsgId,
+            role: "assistant",
+            text: ""
+          }
+        ]);
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let accumulatedText = "";
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
+
+          let b = 0;
+          while (b < buffer.length) {
+            const startIdx = buffer.indexOf('{', b);
+            if (startIdx === -1) {
+              break;
+            }
+
+            let bracketCount = 0;
+            let endIdx = -1;
+            let inString = false;
+            let escape = false;
+
+            for (let i = startIdx; i < buffer.length; i++) {
+              const char = buffer[i];
+              if (escape) {
+                escape = false;
+                continue;
+              }
+              if (char === '\\') {
+                escape = true;
+                continue;
+              }
+              if (char === '"') {
+                inString = !inString;
+                continue;
+              }
+              if (!inString) {
+                if (char === '{') {
+                  bracketCount++;
+                } else if (char === '}') {
+                  bracketCount--;
+                  if (bracketCount === 0) {
+                    endIdx = i;
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (endIdx !== -1) {
+              const jsonStr = buffer.substring(startIdx, endIdx + 1);
+              try {
+                const obj = JSON.parse(jsonStr);
+                const text = obj.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                if (text) {
+                  accumulatedText += text;
+                  setSimMessages((prev) =>
+                    prev.map((msg) =>
+                      msg.id === assistantMsgId ? { ...msg, text: accumulatedText } : msg
+                    )
+                  );
+                }
+              } catch (e) {
+                console.warn("Could not parse JSON object in stream:", e);
+              }
+              b = endIdx + 1;
+            } else {
+              break;
+            }
+          }
+          buffer = buffer.substring(b);
+        }
+
+        if (!accumulatedText) {
+          throw new Error("No text content returned from the stream.");
+        }
+
+      } catch (e: any) {
+        setSimLoading(false);
+        setSimMessages((prev) => prev.filter((msg) => msg.id !== assistantMsgId));
+        setSimMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now() + 1,
+            role: "assistant",
+            text: `❌ **API Connection Error:** ${e.message || "Could not query Gemini API."}\n\nMake sure your pasted API Key is valid and that you have unrestricted network access to \`generativelanguage.googleapis.com\`.`
+          }
+        ]);
+      }
+    } else {
+      setSimLoading(true);
+      setTimeout(() => {
+        let mockResponse = "";
+        if (currentAttach && currentAttach.domContext) {
+          mockResponse = `<thinking>Analyzing current webpage context and DOM structure...
+- DOM context contains webpage Title and innerText
+- Retrieved capture reference image
+- Evaluating page hierarchy and summarizing key details</thinking>🔮 **[SIMULATED GEMINI RESPONSE]**
+
+I successfully analyzed the DOM content and screenshot you captured!
+
+**Website Analysis Summary:**
+- **Page Title:** ${currentAttach.domContext.title}
+- **Source URL:** ${currentAttach.domContext.url}
+
+**Identified Page Content:**
+"${currentAttach.domContext.text.substring(0, 150)}..."
+
+**How to Run Live Requests:**
+If you paste your real API key into the simulator's settings tab (click ⚙️ above), I will make a live request to the Google GenAI endpoints to prove how the model parses the website structure!`;
+        } else if (currentAttach) {
+          mockResponse = `<thinking>Processing user-uploaded document: ${currentAttach.name}...
+- Extracted content structure
+- Preparing summaries</thinking>🔮 **[SIMULATED GEMINI RESPONSE]**
+
+I successfully processed your uploaded file **"${currentAttach.name}"** (${currentAttach.size}).
+
+To run real visual image queries and receive actual text generations, paste your real Gemini API key into the simulator settings panel (⚙️) above! Once pasted, the simulator executes direct, serverless API calls to **${activeModelId}** from your browser!`;
+        } else {
+          mockResponse = `<thinking>User prompted: "${userMsgText}"
+- Interpreting core request
+- Formulating instructions to load and use the browser extension</thinking>🔮 **[SIMULATED GEMINI RESPONSE]**
+
+I received your query: *"${userMsgText}"*
+
+**How this works:**
+This simulator mimics the exact behavior of the Chrome Extension you will load. To test real Gemini capabilities directly in this preview:
+1. Click the gear icon (**⚙️**) inside this phone mock-up.
+2. Paste your Gemini API key from Google AI Studio.
+3. Type any question, and the simulator will connect directly to **${activeModelId}** for a fully responsive, real-time conversation!
+
+To install this tool directly into your Chrome browser, check out the **Installation Guide** tab!`;
+        }
 
         setSimMessages((prev) => [
           ...prev,
           {
             id: Date.now() + 1,
             role: "assistant",
-            text: responseText || "Empty model response. Please check your query or API parameters."
+            text: mockResponse
           }
         ]);
-      } else {
-        setTimeout(() => {
-          let mockResponse = "";
-          if (currentAttach && currentAttach.domContext) {
-            mockResponse = `🔮 **[SIMULATED GEMINI RESPONSE]**\n\nI successfully analyzed the DOM content and screenshot you captured!\n\n**Website Analysis Summary:**\n- **Page Title:** ${currentAttach.domContext.title}\n- **Source URL:** ${currentAttach.domContext.url}\n\n**Identified Page Content:**\n"${currentAttach.domContext.text.substring(0, 150)}..."\n\n**How to Run Live Requests:**\nIf you paste your real API key into the simulator's settings tab (click ⚙️ above), I will make a live request to the Google GenAI endpoints to prove how the model parses the website structure!`;
-          } else if (currentAttach) {
-            mockResponse = `🔮 **[SIMULATED GEMINI RESPONSE]**\n\nI successfully processed your uploaded file **"${currentAttach.name}"** (${currentAttach.size}).\n\nTo run real visual image queries and receive actual text generations, paste your real Gemini API key into the simulator settings panel (⚙️) above! Once pasted, the simulator executes direct, serverless API calls to **${activeModelId}** from your browser!`;
-          } else {
-            mockResponse = `🔮 **[SIMULATED GEMINI RESPONSE]**\n\nI received your query: *"${userMsgText}"*\n\n**How this works:**\nThis simulator mimics the exact behavior of the Chrome Extension you will load. To test real Gemini capabilities directly in this preview:\n1. Click the gear icon (**⚙️**) inside this phone mock-up.\n2. Paste your Gemini API key from Google AI Studio.\n3. Type any question, and the simulator will connect directly to **${activeModelId}** for a fully responsive, real-time conversation!\n\nTo install this tool directly into your Chrome browser, check out the **Installation Guide** tab!`;
-          }
-
-          setSimMessages((prev) => [
-            ...prev,
-            {
-              id: Date.now() + 1,
-              role: "assistant",
-              text: mockResponse
-            }
-          ]);
-        }, 1200);
-      }
-    } catch (e: any) {
-      setSimMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          role: "assistant",
-          text: `❌ **API Connection Error:** ${e.message || "Could not query Gemini API."}\n\nMake sure your pasted API Key is valid and that you have unrestricted network access to \`generativelanguage.googleapis.com\`.`
-        }
-      ]);
-    } finally {
-      setSimLoading(false);
+        setSimLoading(false);
+      }, 1200);
     }
   };
 
@@ -1100,7 +1509,7 @@ export default function App() {
       <main className="max-w-6xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         
         {/* Left Side: Navigation Tabs and Worksheets */}
-        <section className="lg:col-span-7 space-y-6">
+        <section className="lg:col-span-5 space-y-6">
           
           {/* Navigation Controls */}
           <div className="flex items-center bg-slate-900/60 p-1 border border-slate-800 rounded-xl">
@@ -1303,227 +1712,370 @@ export default function App() {
         </section>
 
         {/* Right Side: Extension Screen Simulator Shell */}
-        <section className="lg:col-span-5 flex justify-center">
-          <div className="w-[360px] bg-slate-900 border-4 border-slate-800 rounded-[36px] shadow-2xl overflow-hidden flex flex-col h-[520px] relative">
+        <section className="lg:col-span-7 flex justify-center w-full">
+          {/* Desktop Browser Mockup Container */}
+          <div className="w-full max-w-[680px] bg-slate-900 border border-slate-800/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[580px] relative">
             
-            {/* Camera speaker bezel indicator */}
-            <div className="h-6 bg-slate-900 flex justify-center items-center gap-1.5 shrink-0">
-              <div className="w-12 h-3.5 bg-slate-950 rounded-full" />
-              <div className="w-2 h-2 bg-slate-950 rounded-full" />
+            {/* macOS / Chrome Title Bar Bar */}
+            <div className="bg-slate-950 px-4 py-2.5 flex items-center justify-between gap-2 shrink-0 border-b border-slate-800/80 select-none">
+              {/* Traffic Lights */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <div className="w-2.5 h-2.5 bg-red-500/80 rounded-full" />
+                <div className="w-2.5 h-2.5 bg-yellow-500/80 rounded-full" />
+                <div className="w-2.5 h-2.5 bg-green-500/80 rounded-full" />
+              </div>
+              
+              {/* Browser Tabs */}
+              <div className="flex items-center gap-1 flex-1 max-w-sm ml-4 text-left">
+                <div className="bg-slate-900 border-t border-x border-slate-800/80 px-2.5 py-1 rounded-t-md text-[9px] text-slate-300 font-medium truncate flex items-center gap-1.5 shadow-sm">
+                  <span className="text-blue-400">✨</span>
+                  <span>Gemini Web Companion</span>
+                </div>
+                <div className="hidden sm:block text-[9px] text-slate-500 px-2 py-1 hover:text-slate-400 truncate cursor-pointer">
+                  Google AI Studio
+                </div>
+              </div>
+
+              {/* Window Utilities */}
+              <div className="text-[10px] text-slate-600 font-mono flex items-center gap-1">
+                <span>✕</span> <span>―</span> <span>▢</span>
+              </div>
             </div>
 
-            {/* Simulated Extension Header */}
-            <header className="flex justify-between items-center px-4 py-2.5 bg-slate-800 border-b border-slate-700 shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="text-blue-400 text-sm">✨</span>
-                <span className="text-xs font-semibold text-slate-200">Gemini Companion</span>
+            {/* Browser Control Bar (Address Bar + Extensions) */}
+            <div className="bg-slate-900 px-4 py-1.5 flex items-center gap-3 shrink-0 border-b border-slate-800/80 select-none">
+              <div className="flex items-center gap-2 text-slate-500">
+                <span className="text-xs font-semibold cursor-pointer hover:text-slate-300">←</span>
+                <span className="text-xs font-semibold cursor-pointer hover:text-slate-300">→</span>
+                <RotateCw className="w-2.5 h-2.5 cursor-pointer hover:text-slate-300" />
               </div>
-              <button
-                onClick={() => setSimSettingsOpen(!simSettingsOpen)}
-                className={`p-1 rounded text-slate-400 hover:text-slate-100 transition cursor-pointer ${simSettingsOpen ? "bg-slate-700 text-white" : ""}`}
-                title="Settings"
-              >
-                <Settings className="w-4 h-4" />
-              </button>
-            </header>
 
-            {/* Simulated Settings Window */}
-            {simSettingsOpen && (
-              <div className="absolute top-[50px] left-0 w-full bg-slate-800 border-b border-slate-700 px-4 py-3 z-30 space-y-2.5 shadow-xl">
-                <div className="flex justify-between items-center border-b border-slate-700 pb-1.5">
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Settings Config</h4>
-                  <button onClick={() => setSimSettingsOpen(false)} className="text-slate-400 hover:text-slate-200"><X className="w-3.5 h-3.5" /></button>
-                </div>
-                
-                <div className="space-y-2">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-medium text-slate-400">Gemini API Key</label>
-                    <div className="flex gap-1.5">
-                      <input
-                        type={simShowKey ? "text" : "password"}
-                        value={simApiKey}
-                        onChange={(e) => setSimApiKey(e.target.value)}
-                        placeholder="Paste your Gemini API Key..."
-                        className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100 flex-1 outline-none focus:border-blue-500"
-                      />
-                      <button
-                        onClick={() => setSimShowKey(!simShowKey)}
-                        className="p-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300 text-[10px]"
-                      >
-                        {simShowKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-medium text-slate-400">Select Model</label>
-                    <select
-                      value={simModel}
-                      onChange={(e) => setSimModel(e.target.value)}
-                      className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100 outline-none focus:border-blue-500"
-                    >
-                      <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                      <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-                      <option value="gemini-1.5-flash">gemini-1.5-flash</option>
-                      <option value="gemini-1.5-pro">gemini-1.5-pro</option>
-                      <option value="custom">-- Custom Model --</option>
-                    </select>
-                  </div>
-
-                  {simModel === "custom" && (
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] font-medium text-slate-400">Custom Model ID</label>
-                      <input
-                        type="text"
-                        value={simCustomModel}
-                        onChange={(e) => setSimCustomModel(e.target.value)}
-                        placeholder="e.g. gemini-3.5-flash"
-                        className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100 outline-none"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex justify-end pt-1">
-                  <button
-                    onClick={() => {
-                      setSimSettingsOpen(false);
-                      setSimMessages((prev) => [
-                        ...prev,
-                        {
-                          id: Date.now(),
-                          role: "assistant",
-                          text: simApiKey 
-                            ? "✅ API Key saved! You can now send real queries directly to Gemini models."
-                            : "⚠️ No API Key entered. Real connections are paused; falling back to simulated analysis modes."
-                        }
-                      ]);
-                    }}
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-medium rounded px-3 py-1 text-xs transition cursor-pointer"
-                  >
-                    Save settings
-                  </button>
-                </div>
+              {/* Address bar */}
+              <div className="bg-slate-950 border border-slate-850 rounded-md px-3 py-0.5 flex items-center gap-2 flex-1 text-left">
+                <Globe className="w-2.5 h-2.5 text-slate-500" />
+                <span className="text-[9px] text-slate-400 font-mono truncate select-all flex-1">https://ai.google.dev/blog/gemini-web-companion</span>
               </div>
-            )}
 
-            {/* Simulated Chat Feed Area */}
-            <main className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-950">
-              
-              {/* Alert Warning for empty API Key in Simulator */}
-              {!simApiKey && (
-                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400 text-[11px] leading-relaxed">
-                  ⚠️ <strong>Real Gemini request mode is paused.</strong> Enter your key via settings (⚙️) above for live model generation.
-                </div>
-              )}
-
-              {simMessages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex flex-col max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
-                    msg.role === "user"
-                      ? "bg-blue-600 text-white self-end rounded-br-none"
-                      : "bg-slate-800 text-slate-200 border border-slate-700/60 self-start rounded-bl-none"
-                  }`}
-                >
-                  {/* Rendering Simulated Attachment inside Bubble */}
-                  {msg.attachment && (
-                    <div className="mb-2 bg-slate-950/40 p-1.5 rounded-lg border border-white/5 flex items-center gap-1.5 text-[10px]">
-                      <span>{msg.attachment.isImage ? "🖼️" : "📄"}</span>
-                      <span className="truncate flex-1 font-medium">{msg.attachment.name}</span>
-                    </div>
-                  )}
-
-                  <p className="whitespace-pre-line">{msg.text}</p>
-                </div>
-              ))}
-
-              {simLoading && (
-                <div className="bg-slate-800 text-slate-300 border border-slate-700 rounded-xl px-3 py-2 text-xs self-start rounded-bl-none flex items-center gap-2 max-w-[80%]">
-                  <div className="w-3 h-3 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin" />
-                  <span className="animate-pulse">Gemini thinking...</span>
-                </div>
-              )}
-
-              <div ref={simChatEndRef} />
-            </main>
-
-            {/* Simulated Attachment Box */}
-            {simAttachment && (
-              <div className="px-3 py-2 bg-slate-800 border-t border-slate-700 flex items-center justify-between gap-2 shrink-0">
-                <div className="flex items-center gap-2 overflow-hidden">
-                  <span className="text-sm">{simAttachment.isImage ? "🖼️" : "📄"}</span>
-                  <div className="flex flex-col overflow-hidden text-[10px]">
-                    <span className="text-slate-200 font-medium truncate">{simAttachment.name}</span>
-                    <span className="text-slate-400 font-mono text-[8px]">{simAttachment.size}</span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setSimAttachment(null)}
-                  className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-red-400 shrink-0"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-
-            {/* Simulated Input Area */}
-            <footer className="p-3 bg-slate-800 border-t border-slate-700 shrink-0 relative z-10">
-              <div className="flex items-center gap-2 relative">
-                
-                {/* Plus button trigger */}
+              {/* Extension Bar Icons */}
+              <div className="flex items-center gap-2 text-slate-400">
+                <Puzzle className="w-3.5 h-3.5 hover:text-slate-200 cursor-pointer" title="Extensions" />
+                {/* Glowing Sparkles button representing our Sidepanel Extension Action */}
                 <div className="relative">
-                  <button
-                    onClick={() => setSimPlusMenuOpen(!simPlusMenuOpen)}
-                    className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg hover:text-white transition cursor-pointer"
+                  <button 
+                    className="p-1 bg-gradient-to-r from-blue-500/10 to-violet-500/10 border border-blue-500/30 rounded text-blue-400 hover:text-blue-300 transition animate-pulse cursor-pointer flex items-center justify-center"
+                    title="Open Gemini Companion Side Panel"
                   >
-                    <Plus className="w-4 h-4" />
+                    <Sparkles className="w-3 h-3" />
                   </button>
+                  <span className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                </div>
+              </div>
+            </div>
 
-                  {/* Plus Options Popover */}
-                  {simPlusMenuOpen && (
-                    <div className="absolute bottom-11 left-0 bg-slate-800 border border-slate-700 rounded-lg shadow-xl w-[220px] p-1.5 flex flex-col z-40">
-                      <label className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-700 text-xs text-slate-300 hover:text-white cursor-pointer transition">
-                        <span>📁</span>
-                        <span>Upload Custom File</span>
-                        <input
-                          type="file"
-                          onChange={handleSimFileUpload}
-                          className="hidden"
-                        />
-                      </label>
-                      <button
-                        onClick={handleSimScreenCapture}
-                        className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-700 text-xs text-slate-300 hover:text-white text-left transition cursor-pointer"
-                      >
-                        <span>📸</span>
-                        <span>Capture Screen + DOM</span>
-                      </button>
-                    </div>
-                  )}
+            {/* Split Screen Viewport: Mock Webpage on Left, Docked Side Panel on Right */}
+            <div className="flex flex-1 overflow-hidden">
+              
+              {/* LEFT SIDE: Mock Article Webpage */}
+              <div className="hidden sm:flex sm:flex-col sm:flex-1 bg-slate-950 p-4 overflow-y-auto select-none border-r border-slate-800/80 text-left">
+                <div className="border-b border-slate-800 pb-3 mb-3">
+                  <div className="text-blue-500 font-mono text-[9px] uppercase font-bold tracking-wider">Research Article</div>
+                  <h2 className="text-sm font-bold text-white mt-1 leading-snug">
+                    How Gemini Models are Reshaping Browser Workflows
+                  </h2>
+                  <div className="text-[9px] text-slate-500 mt-1">Published June 2026 • 4 min read</div>
                 </div>
 
-                {/* Main simulated text bar */}
-                <input
-                  type="text"
-                  value={simInput}
-                  onChange={(e) => setSimInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSimSend();
-                  }}
-                  placeholder="Ask Gemini anything..."
-                  className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 flex-1 outline-none focus:border-blue-500"
-                />
+                <div className="space-y-3 text-[11px]">
+                  <p className="text-slate-300 leading-relaxed">
+                    Traditional web browsers were built as static document viewers. However, the integration of 
+                    <span className="bg-blue-500/10 text-blue-400 px-1 py-0.5 rounded font-medium mx-1">Manifest V3 Side Panels</span>
+                    and high-context models transforms them into active runtime workspaces.
+                  </p>
+                  
+                  <div className="rounded-lg bg-slate-900 border border-slate-800 p-2.5 text-slate-400 leading-relaxed border-l-2 border-l-blue-500 font-serif italic">
+                    "The standard popup extension closes as soon as the user clicks anywhere else. 
+                    By migrating to a <strong>persistent side panel layout</strong>, Gemini remains actively 
+                    docked next to your browsing viewport."
+                  </div>
 
-                <button
-                  onClick={handleSimSend}
-                  className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition shrink-0 cursor-pointer"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
+                  <p className="text-slate-300 leading-relaxed">
+                    This sidebar is fully context-aware. With a single click, users can capture the page DOM 
+                    or query visual layouts directly.
+                  </p>
+
+                  {/* Simulated webpage highlight */}
+                  <div className="p-2.5 bg-blue-950/20 border border-blue-500/20 rounded-lg">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-[9px] text-blue-400 font-bold uppercase tracking-wide">Target Webpage Scraped DOM:</span>
+                      <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1 rounded font-mono">Ready</span>
+                    </div>
+                    <div className="text-slate-400 text-[9px] font-mono leading-relaxed bg-slate-950 p-1.5 rounded border border-slate-900/60 max-h-[80px] overflow-y-auto">
+                      Title: Reshaping Browser Workflows<br />
+                      URL: https://ai.google.dev/blog/gemini-web-companion<br />
+                      DOM Text: Manifest V3 Side Panels and high-context models transform browsers into active runtime workspaces...
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={handleSimScreenCapture}
+                    className="w-full py-2 bg-gradient-to-r from-blue-600/90 to-violet-600/90 hover:from-blue-600 hover:to-violet-600 text-white font-medium rounded-md transition text-[10px] flex items-center justify-center gap-1.5 shadow-md"
+                  >
+                    <span>📸</span>
+                    <span>Simulate Page Capture in Sidebar</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* RIGHT SIDE: The Gemini Side Panel (Sidebar) */}
+              <div className="w-full sm:w-[280px] md:w-[310px] bg-slate-900 flex flex-col h-full relative shrink-0">
+                {/* Simulated Extension Header */}
+                <header className="flex justify-between items-center px-3.5 py-2.5 bg-slate-800 border-b border-slate-700/60 shrink-0 select-none">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-blue-400 text-xs">✨</span>
+                    <span className="text-[11px] font-semibold text-slate-200">Gemini Companion Side Panel</span>
+                  </div>
+                  <button
+                    onClick={() => setSimSettingsOpen(!simSettingsOpen)}
+                    className={`p-1 rounded text-slate-400 hover:text-slate-100 transition cursor-pointer ${simSettingsOpen ? "bg-slate-700 text-white" : ""}`}
+                    title="Settings"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                  </button>
+                </header>
+
+                {/* Simulated Settings Window */}
+                {simSettingsOpen && (
+                  <div className="absolute top-[38px] left-0 w-full bg-slate-800 border-b border-slate-700 px-3.5 py-3 z-30 space-y-2 shadow-xl text-left">
+                    <div className="flex justify-between items-center border-b border-slate-700 pb-1.5">
+                      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Settings Config</h4>
+                      <button onClick={() => setSimSettingsOpen(false)} className="text-slate-400 hover:text-slate-200"><X className="w-3 h-3" /></button>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[9px] font-medium text-slate-400">Gemini API Key</label>
+                        <div className="flex gap-1">
+                          <input
+                            type={simShowKey ? "text" : "password"}
+                            value={simApiKey}
+                            onChange={(e) => setSimApiKey(e.target.value)}
+                            placeholder="Paste your Gemini API Key..."
+                            className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-100 flex-1 outline-none focus:border-blue-500"
+                          />
+                          <button
+                            onClick={() => setSimShowKey(!simShowKey)}
+                            className="p-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300"
+                          >
+                            {simShowKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[9px] font-medium text-slate-400">Select Model</label>
+                        <select
+                          value={simModel}
+                          onChange={(e) => setSimModel(e.target.value)}
+                          className="bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] text-slate-100 outline-none focus:border-blue-500"
+                        >
+                          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                          <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                          <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                          <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                          <option value="custom">-- Custom Model --</option>
+                        </select>
+                      </div>
+
+                      {simModel === "custom" && (
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[9px] font-medium text-slate-400">Custom Model ID</label>
+                          <input
+                            type="text"
+                            value={simCustomModel}
+                            onChange={(e) => setSimCustomModel(e.target.value)}
+                            placeholder="e.g. gemini-3.5-flash"
+                            className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-[11px] text-slate-100 outline-none"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex justify-end pt-1">
+                      <button
+                        onClick={() => {
+                          setSimSettingsOpen(false);
+                          setSimMessages((prev) => [
+                            ...prev,
+                            {
+                              id: Date.now(),
+                              role: "assistant",
+                              text: simApiKey 
+                                ? "✅ API Key saved! You can now send real queries directly to Gemini models."
+                                : "⚠️ No API Key entered. Real connections are paused; falling back to simulated analysis modes."
+                            }
+                          ]);
+                        }}
+                        className="bg-blue-600 hover:bg-blue-500 text-white font-medium rounded px-2.5 py-1 text-[10px] transition cursor-pointer"
+                      >
+                        Save Settings
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Simulated Chat Feed Area */}
+                <main className="flex-1 overflow-y-auto p-3.5 space-y-3.5 bg-slate-950 text-left">
+                  
+                  {/* Alert Warning for empty API Key in Simulator */}
+                  {!simApiKey && (
+                    <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-400 text-[10px] leading-relaxed">
+                      ⚠️ <strong>Real Gemini request mode is paused.</strong> Enter your key via settings (⚙️) above for live model generation.
+                    </div>
+                  )}
+
+                  {simMessages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className={`flex flex-col max-w-[85%] rounded-xl px-2.5 py-2 text-[11px] leading-relaxed ${
+                        msg.role === "user"
+                          ? "bg-blue-600 text-white self-end rounded-br-none"
+                          : "bg-slate-800 text-slate-200 border border-slate-700/60 self-start rounded-bl-none"
+                      }`}
+                    >
+                      {/* Rendering Simulated Attachment inside Bubble */}
+                      {msg.attachment && (
+                        <div className="mb-2 bg-slate-950/40 p-1 rounded-md border border-white/5 flex items-center gap-1 text-[9px]">
+                          <span>{msg.attachment.isImage ? "🖼️" : "📄"}</span>
+                          <span className="truncate flex-1 font-medium">{msg.attachment.name}</span>
+                        </div>
+                      )}
+
+                      {/* Rendering text with details component for collapsible reasoning */}
+                      {(() => {
+                        if (msg.role === "assistant") {
+                          const parsed = parseThinkingAndContent(msg.text);
+                          const isStillStreaming = msg.text.indexOf("</thinking>") === -1;
+                          return (
+                            <div className="space-y-1.5">
+                              {parsed.thinking && (
+                                <div className="border border-dashed border-blue-500/25 rounded-lg bg-slate-900/50 overflow-hidden text-left">
+                                  <details className="group" open={isStillStreaming}>
+                                    <summary className="flex items-center justify-between px-2 py-1 bg-blue-500/5 text-blue-300 font-medium text-[9px] cursor-pointer hover:bg-blue-500/10 outline-none select-none">
+                                      <span className="flex items-center gap-1">
+                                        <span className="inline-block animate-pulse">🧠</span>
+                                        <span>Thinking Process</span>
+                                      </span>
+                                      <span className="text-[7px] text-slate-500 group-open:rotate-180 transition-transform">▼</span>
+                                    </summary>
+                                    <div className="p-1.5 font-mono text-[8px] text-slate-400 border-t border-blue-500/10 max-h-[100px] overflow-y-auto whitespace-pre-wrap">
+                                      {parsed.thinking}
+                                    </div>
+                                  </details>
+                                </div>
+                              )}
+                              {parsed.content ? (
+                                <p className="whitespace-pre-wrap">{parsed.content}</p>
+                              ) : (
+                                parsed.thinking ? null : <p className="whitespace-pre-wrap">...</p>
+                              )}
+                            </div>
+                          );
+                        } else {
+                          return <p className="whitespace-pre-wrap">{msg.text}</p>;
+                        }
+                      })()}
+                    </div>
+                  ))}
+
+                  {simLoading && (
+                    <div className="bg-slate-800 text-slate-300 border border-slate-700 rounded-xl px-2.5 py-1.5 text-[11px] self-start rounded-bl-none flex items-center gap-1.5 max-w-[80%]">
+                      <div className="w-2.5 h-2.5 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin" />
+                      <span className="animate-pulse">Gemini thinking...</span>
+                    </div>
+                  )}
+
+                  <div ref={simChatEndRef} />
+                </main>
+
+                {/* Simulated Attachment Box */}
+                {simAttachment && (
+                  <div className="px-3 py-1.5 bg-slate-800 border-t border-slate-700 flex items-center justify-between gap-2 shrink-0 text-left select-none">
+                    <div className="flex items-center gap-1.5 overflow-hidden">
+                      <span className="text-xs">{simAttachment.isImage ? "🖼️" : "📄"}</span>
+                      <div className="flex flex-col overflow-hidden text-[9px]">
+                        <span className="text-slate-200 font-medium truncate">{simAttachment.name}</span>
+                        <span className="text-slate-400 font-mono text-[8px]">{simAttachment.size}</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setSimAttachment(null)}
+                      className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-red-400 shrink-0"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Simulated Input Area */}
+                <footer className="p-2.5 bg-slate-800 border-t border-slate-700 shrink-0 relative z-10">
+                  <div className="flex items-center gap-1.5 relative">
+                    
+                    {/* Plus button trigger */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setSimPlusMenuOpen(!simPlusMenuOpen)}
+                        className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg hover:text-white transition cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+
+                      {/* Plus Options Popover */}
+                      {simPlusMenuOpen && (
+                        <div className="absolute bottom-10 left-0 bg-slate-800 border border-slate-700 rounded-lg shadow-xl w-[200px] p-1 flex flex-col z-40 text-left">
+                          <label className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-slate-700 text-[10px] text-slate-300 hover:text-white cursor-pointer transition">
+                            <span>📁</span>
+                            <span>Upload Custom File</span>
+                            <input
+                              type="file"
+                              onChange={handleSimFileUpload}
+                              className="hidden"
+                            />
+                          </label>
+                          <button
+                            onClick={handleSimScreenCapture}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-slate-700 text-[10px] text-slate-300 hover:text-white text-left transition cursor-pointer"
+                          >
+                            <span>📸</span>
+                            <span>Capture Screen + DOM</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Main simulated text bar */}
+                    <input
+                      type="text"
+                      value={simInput}
+                      onChange={(e) => setSimInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSimSend();
+                      }}
+                      placeholder="Ask Gemini in side panel..."
+                      className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-100 flex-1 outline-none focus:border-blue-500"
+                    />
+
+                    <button
+                      onClick={handleSimSend}
+                      className="p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition shrink-0 cursor-pointer flex items-center justify-center"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
+
+                  </div>
+                </footer>
 
               </div>
-            </footer>
+            </div>
 
           </div>
         </section>

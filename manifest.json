@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "Talk to Gemini models directly from your browser. Upload files, capture screenshots, and query current page DOM context.",
   "permissions": [
+    "sidePanel",
     "activeTab",
     "scripting",
     "storage"
@@ -12,8 +13,10 @@
     "<all_urls>"
   ],
   "action": {
-    "default_popup": "popup.html",
     "default_icon": "icon.svg"
+  },
+  "side_panel": {
+    "default_path": "popup.html"
   },
   "icons": {
     "16": "icon.svg",
