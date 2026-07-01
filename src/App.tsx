@@ -1451,6 +1451,7 @@ export default function App() {
     return localStorage.getItem("simActiveChatId") || "chat-default";
   });
   const [simChatsOpen, setSimChatsOpen] = useState<boolean>(false);
+  const [simTabPickerOpen, setSimTabPickerOpen] = useState<boolean>(false);
 
   // Derive simMessages based on active chat
   const activeSimChat = simChats.find(c => c.id === simActiveChatId) || simChats[0];
@@ -1540,25 +1541,65 @@ export default function App() {
 
   // Screen/DOM Capture simulation in simulator
   const handleSimScreenCapture = () => {
-    setSimLoading(true);
     setSimPlusMenuOpen(false);
+    setSimTabPickerOpen(true);
+  };
+
+  const SIM_MOCK_TABS = [
+    {
+      id: 1,
+      title: "Gemini Extension Builder",
+      url: "https://gemini-extension-builder.ai.studio",
+      icon: "🛠️",
+      screenshot: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80",
+      text: "Gemini Extension Builder is an advanced workbench to package custom Manifest V3 extensions. The app facilitates in-browser compilation of manifest.json, popup.html, popup.css, and popup.js into a packed ZIP folder. Built on June 2026, it uses React, Tailwind v4 and local JSZip compiler."
+    },
+    {
+      id: 2,
+      title: "Google Search - Gemini API Documentation",
+      url: "https://www.google.com/search?q=gemini+api+documentation",
+      icon: "🔍",
+      screenshot: "https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&w=400&q=80",
+      text: "Search Results for Gemini API:\n1. Gemini API Overview - Google AI for Developers.\n2. GitHub - google-gemini/nanofsu: TypeScript SDK for the Gemini API.\n3. Build Extensions using the Gemini API - Manifest V3 Developer Guide."
+    },
+    {
+      id: 3,
+      title: "Gemini API Documentation & Guides",
+      url: "https://ai.google.dev/gemini-api/docs",
+      icon: "📕",
+      screenshot: "https://images.unsplash.com/photo-1542831371-29b0f74f9713?auto=format&fit=crop&w=400&q=80",
+      text: "Welcome to the Gemini API developer guides. Learn how to construct multi-modal content prompts, run streaming chats, enable code execution tools, and use advanced thinking models with think levels. Let's build stateful or stateless browser integrations today!"
+    },
+    {
+      id: 4,
+      title: "TechCrunch - AI Innovations in 2026",
+      url: "https://techcrunch.com/2026/06/gemini-unveils-new-thinking-features",
+      icon: "📰",
+      screenshot: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=400&q=80",
+      text: "TechCrunch: Google Gemini introduces highly transparent 'thinking' blocks for client-side side panel extensions. The new SDK provides structured 'thought' blocks within JSON stream chunks, yielding massive reasoning speedups and giving developers deep observability into multi-step agent actions."
+    }
+  ];
+
+  const handleSelectSimTab = (tab: typeof SIM_MOCK_TABS[0]) => {
+    setSimTabPickerOpen(false);
+    setSimLoading(true);
     
     setTimeout(() => {
       setSimAttachment({
-        name: "Capture: Gemini Extension Builder",
+        name: `Capture: ${tab.title}`,
         size: "Current Webpage (DOM + HTML)",
         type: "image/jpeg",
         isImage: true,
-        base64: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80",
+        base64: tab.screenshot,
         domContext: {
-          title: "Gemini Extension Builder",
-          url: "https://gemini-extension-builder.ai.studio",
-          text: "Gemini Extension Builder is an advanced workbench to package custom Manifest V3 extensions. The app facilitates in-browser compilation of manifest.json, popup.html, popup.css, and popup.js into a packed ZIP folder. Built on June 2026, it uses React, Tailwind v4 and local JSZip compiler."
+          title: tab.title,
+          url: tab.url,
+          text: tab.text
         }
       });
-      setSimInput("Summarize the captured text of this builder webpage.");
+      setSimInput(`Explain or analyze this "${tab.title}" page for me.`);
       setSimLoading(false);
-    }, 800);
+    }, 600);
   };
 
   // Stop message generation in simulator
@@ -1680,7 +1721,7 @@ export default function App() {
               contents: optimizedHistory,
               systemInstruction: {
                 parts: [{
-                  text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, or 'get_page_screenshot' to get a visual screenshot.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters (like ryandsqt/W2W2W2... or other base64 fragments).\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally to answer the user's specific query.\n- Keep explanations conversational, elegant, and markdown-formatted."
+                  text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, and 'type_text' to fill out input fields.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
                 }]
               },
               tools: [{
@@ -1694,6 +1735,46 @@ export default function App() {
                     name: "get_page_screenshot",
                     description: "Captures a visual screenshot of the current visible tab's viewport as base64 JPEG image data.",
                     parameters: { type: "OBJECT", properties: {} }
+                  },
+                  {
+                    name: "click_element",
+                    description: "Clicks an element on the webpage of the active browser tab by its CSS selector or text context.",
+                    parameters: {
+                      type: "OBJECT",
+                      properties: {
+                        selector: {
+                          type: "STRING",
+                          description: "CSS selector of the element to click (e.g. 'button', '#submit', '.btn-login', 'a')."
+                        },
+                        textContext: {
+                          type: "STRING",
+                          description: "Optional case-insensitive text inside the element to click (e.g. 'Submit', 'Log In', 'Sign Up')."
+                        }
+                      },
+                      required: ["selector"]
+                    }
+                  },
+                  {
+                    name: "type_text",
+                    description: "Types text into an input or textarea on the webpage of the active browser tab.",
+                    parameters: {
+                      type: "OBJECT",
+                      properties: {
+                        selector: {
+                          type: "STRING",
+                          description: "CSS selector of the input/textarea to type into (e.g. 'input[type=\"text\"]', '#search-input', '.prompt-text')."
+                        },
+                        text: {
+                          type: "STRING",
+                          description: "The text string to type into the element."
+                        },
+                        submitAfter: {
+                          type: "BOOLEAN",
+                          description: "Whether to submit or hit Enter after typing."
+                        }
+                      },
+                      required: ["selector", "text"]
+                    }
                   }
                 ]
               }]
@@ -1827,18 +1908,97 @@ export default function App() {
                 url: "https://gemini-extension-builder.ai.studio",
                 text: "Gemini Extension Builder is an advanced workbench to package custom Manifest V3 extensions. The app facilitates in-browser compilation of manifest.json, popup.html, popup.css, and popup.js into a packed ZIP folder. Built on June 2026, it uses React, Tailwind v4 and local JSZip compiler."
               };
-            } else {
-              // screenshot
+            } else if (activeFunctionCall.name === "get_page_screenshot") {
               toolOutput = {
                 success: true,
                 width: 1280,
                 height: 720,
                 message: "Screenshot captured successfully and attached as an image part. Please analyze the image visually to answer."
               };
+            } else if (activeFunctionCall.name === "click_element") {
+              const sel = activeFunctionCall.args?.selector || "";
+              const txt = activeFunctionCall.args?.textContext || "";
+              let elements: HTMLElement[] = [];
+              if (sel) {
+                try {
+                  elements = Array.from(document.querySelectorAll(sel));
+                } catch (e) {}
+              } else if (txt) {
+                elements = Array.from(document.querySelectorAll("button, a, input, [role='button'], span, p, div")) as HTMLElement[];
+              }
+
+              if (txt && elements.length > 0) {
+                const lowerText = txt.toLowerCase().trim();
+                elements = elements.filter(el => {
+                  const elText = el.textContent || el.innerText || "";
+                  return elText.toLowerCase().trim().includes(lowerText);
+                });
+              }
+
+              const target = elements[0];
+              if (target) {
+                try {
+                  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  target.click();
+                  toolOutput = {
+                    success: true,
+                    tagName: target.tagName,
+                    id: target.id,
+                    text: (target.textContent || "").substring(0, 50).trim(),
+                    message: `[Simulator] Found and clicked <${target.tagName.toLowerCase()}> element on current screen.`
+                  };
+                } catch (err: any) {
+                  toolOutput = { success: false, error: err.message };
+                }
+              } else {
+                toolOutput = {
+                  success: true,
+                  message: `[Simulator Fallback] Element matching '${sel || txt}' clicked successfully in virtual space.`
+                };
+              }
+            } else if (activeFunctionCall.name === "type_text") {
+              const sel = activeFunctionCall.args?.selector || "";
+              const txt = activeFunctionCall.args?.text || "";
+              let target: any = null;
+              try {
+                target = document.querySelector(sel);
+              } catch (e) {}
+
+              if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+                try {
+                  target.focus();
+                  if (target.isContentEditable) {
+                    target.innerText = txt;
+                  } else {
+                    target.value = txt;
+                  }
+                  target.dispatchEvent(new Event('input', { bubbles: true }));
+                  target.dispatchEvent(new Event('change', { bubbles: true }));
+                  toolOutput = {
+                    success: true,
+                    tagName: target.tagName,
+                    id: target.id,
+                    message: `[Simulator] Typed "${txt}" into input field on current screen.`
+                  };
+                } catch (err: any) {
+                  toolOutput = { success: false, error: err.message };
+                }
+              } else {
+                toolOutput = {
+                  success: true,
+                  message: `[Simulator Fallback] Typed "${txt}" into virtual input field matching '${sel}'.`
+                };
+              }
             }
 
             // Append status note to the assistant's text
-            const textWithTool = accumulatedText + `\n\n⚙️ *Called tool: ${activeFunctionCall.name}()*\n⚙️ *Response:* Context successfully loaded!`;
+            let responseNote = "Context successfully loaded!";
+            if (activeFunctionCall.name === "click_element") {
+              responseNote = `Element clicked successfully!`;
+            } else if (activeFunctionCall.name === "type_text") {
+              responseNote = `Typed text: "${activeFunctionCall.args?.text || ""}"`;
+            }
+            const textWithTool = accumulatedText + `\n\n⚙️ *Called tool: ${activeFunctionCall.name}()*\n⚙️ *Response:* ${responseNote}`;
             setSimMessages((prev) =>
               prev.map((msg) =>
                 msg.id === turnMsgId ? { ...msg, text: textWithTool } : msg
@@ -2710,6 +2870,55 @@ To install this tool directly into your Chrome browser, check out the **Installa
         </section>
 
       </main>
+
+      {/* React Tab Picker Modal Overlay for Simulator */}
+      {simTabPickerOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center z-[9999] p-4"
+          onClick={() => setSimTabPickerOpen(false)}
+        >
+          <div 
+            className="bg-slate-850 border border-slate-700/80 rounded-2xl w-full max-w-sm max-h-[420px] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex justify-between items-center p-4 border-b border-slate-700/60 bg-slate-800">
+              <span className="font-semibold text-slate-100 text-xs flex items-center gap-2">
+                <span className="text-base">📸</span> Select Tab to Capture
+              </span>
+              <button 
+                onClick={() => setSimTabPickerOpen(false)}
+                className="text-slate-400 hover:text-slate-100 text-lg w-7 h-7 flex items-center justify-center rounded-full hover:bg-slate-700/60 transition cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Tab List */}
+            <div className="p-3 overflow-y-auto space-y-2 max-h-[340px] bg-slate-900">
+              {SIM_MOCK_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => handleSelectSimTab(tab)}
+                  className="w-full flex items-center gap-3 p-2.5 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-800 hover:border-blue-500/60 transition cursor-pointer text-left group"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-base shrink-0 group-hover:bg-slate-700 transition">
+                    {tab.icon}
+                  </div>
+                  <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                    <span className="font-medium text-slate-100 text-xs truncate">
+                      {tab.title}
+                    </span>
+                    <span className="text-slate-500 text-[10px] truncate font-mono">
+                      {tab.url}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

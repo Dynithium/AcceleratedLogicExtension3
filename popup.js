@@ -36,6 +36,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnNewChat = document.getElementById("btn-new-chat");
   const chatsList = document.getElementById("chats-list");
 
+  // Tab Picker Modal Elements
+  const tabPickerModal = document.getElementById("tab-picker-modal");
+  const closeTabPicker = document.getElementById("close-tab-picker");
+  const pickerTabList = document.getElementById("picker-tab-list");
+
   // Extension State
   let apiKey = "";
   let modelId = "gemini-2.5-flash";
@@ -374,67 +379,133 @@ document.addEventListener("DOMContentLoaded", () => {
     reader.readAsDataURL(file);
   });
 
-  // Capture Page Screenshot + DOM
+  // Close tab picker modal
+  closeTabPicker.addEventListener("click", () => {
+    tabPickerModal.classList.add("hidden");
+  });
+
+  // Clicking outside modal content to close it
+  tabPickerModal.addEventListener("click", (e) => {
+    if (e.target === tabPickerModal) {
+      tabPickerModal.classList.add("hidden");
+    }
+  });
+
+  // Utility to escape HTML strings
+  function escapeHtml(str) {
+    if (!str) return "";
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  // The actual capture tab function
+  function captureTab(selectedTab) {
+    // 1. Activate the tab if it is not currently active
+    chrome.tabs.update(selectedTab.id, { active: true }, () => {
+      // 2. Introduce a small delay to make sure the tab is fully rendered/active
+      setTimeout(() => {
+        // 3. Inject script to read DOM content of the selected tab
+        chrome.scripting.executeScript({
+          target: { tabId: selectedTab.id },
+          func: () => {
+            return {
+              title: document.title,
+              url: window.location.href,
+              text: document.body ? document.body.innerText.substring(0, 50000) : ""
+            };
+          }
+        }, (results) => {
+          let extractedDom = {
+            title: selectedTab.title,
+            url: selectedTab.url,
+            text: ""
+          };
+
+          if (results && results[0] && results[0].result) {
+            extractedDom = results[0].result;
+          }
+
+          // 4. Capture visible screenshot
+          chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 80 }, (screenshotUrl) => {
+            if (!screenshotUrl) {
+              // If capturing fails due to restricted page (e.g. chrome:// tabs)
+              showToast("Failed to capture screen (restricted tab). Using DOM context only.");
+              screenshotUrl = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=";
+            }
+
+            setAttachment({
+              name: `Capture: ${extractedDom.title}`,
+              size: "Webpage + DOM context",
+              mimeType: "image/jpeg",
+              base64: screenshotUrl,
+              domContext: extractedDom
+            });
+            
+            // Auto-fill prompt if empty
+            if (!promptInput.value.trim()) {
+              promptInput.value = "Explain or analyze this page for me.";
+              promptInput.dispatchEvent(new Event("input"));
+            }
+          });
+        });
+      }, 250);
+    });
+  }
+
+  // Capture Page Screenshot + DOM (with tab selection)
   menuCapturePage.addEventListener("click", () => {
-    if (typeof chrome === "undefined" || !chrome.tabs || !chrome.tabs.captureVisibleTab) {
+    // Hide plus menu
+    plusMenu.classList.add("hidden");
+
+    if (typeof chrome === "undefined" || !chrome.tabs || !chrome.tabs.query) {
       showToast("Screenshot capture only works inside real chrome browser!");
       return;
     }
 
-    // Capture tab details
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    // Query all tabs in the current window
+    chrome.tabs.query({ currentWindow: true }, (tabs) => {
       if (!tabs || tabs.length === 0) {
-        showToast("No active browser tab found.");
+        showToast("No tabs found to capture.");
         return;
       }
+
+      // Render tab selection list
+      pickerTabList.innerHTML = "";
       
-      const activeTab = tabs[0];
-      
-      // Inject script to read DOM content
-      chrome.scripting.executeScript({
-        target: { tabId: activeTab.id },
-        func: () => {
-          return {
-            title: document.title,
-            url: window.location.href,
-            text: document.body ? document.body.innerText.substring(0, 50000) : ""
-          };
-        }
-      }, (results) => {
-        let extractedDom = {
-          title: activeTab.title,
-          url: activeTab.url,
-          text: ""
-        };
+      tabs.forEach((tab) => {
+        const tabItem = document.createElement("button");
+        tabItem.className = "tab-picker-item";
+        
+        const favIcon = tab.favIconUrl || "🌐";
+        const iconHtml = (typeof favIcon === "string" && favIcon.startsWith("http")) 
+          ? `<img src="${favIcon}" style="width: 16px; height: 16px; object-fit: contain;" referrerPolicy="no-referrer" />` 
+          : `<span class="tab-picker-icon">${favIcon}</span>`;
 
-        if (results && results[0] && results[0].result) {
-          extractedDom = results[0].result;
-        }
+        tabItem.innerHTML = `
+          <div class="tab-picker-icon">${iconHtml}</div>
+          <div class="tab-picker-info">
+            <span class="tab-picker-title">${escapeHtml(tab.title || "Untitled Tab")}</span>
+            <span class="tab-picker-url">${escapeHtml(tab.url || "")}</span>
+          </div>
+        `;
 
-        // Capture visible screenshot
-        chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 80 }, (screenshotUrl) => {
-          if (!screenshotUrl) {
-            // If capturing fails due to restricted page (e.g. chrome:// tabs)
-            showToast("Failed to capture screen (restricted tab). Using DOM context only.");
-            // We can use a transparent pixel fallback so it still works
-            screenshotUrl = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=";
-          }
-
-          setAttachment({
-            name: `Capture: ${extractedDom.title}`,
-            size: "Webpage + DOM context",
-            mimeType: "image/jpeg",
-            base64: screenshotUrl,
-            domContext: extractedDom
-          });
+        tabItem.addEventListener("click", () => {
+          // Hide modal
+          tabPickerModal.classList.add("hidden");
           
-          // Auto-fill prompt if empty
-          if (!promptInput.value.trim()) {
-            promptInput.value = "Explain or analyze this page for me.";
-            promptInput.dispatchEvent(new Event("input"));
-          }
+          // Perform capture of the selected tab!
+          captureTab(tab);
         });
+
+        pickerTabList.appendChild(tabItem);
       });
+
+      // Show the modal
+      tabPickerModal.classList.remove("hidden");
     });
   });
 
@@ -657,7 +728,7 @@ document.addEventListener("DOMContentLoaded", () => {
           contents: cleanContents,
           systemInstruction: {
             parts: [{
-              text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, or 'get_page_screenshot' to get a visual screenshot.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters (like ryandsqt/W2W2W2... or other base64 fragments).\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally to answer the user's specific query.\n- Keep explanations conversational, elegant, and markdown-formatted."
+              text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, and 'type_text' to fill out input fields.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
             }]
           },
           tools: [{
@@ -676,6 +747,46 @@ document.addEventListener("DOMContentLoaded", () => {
                 parameters: {
                   type: "OBJECT",
                   properties: {}
+                }
+              },
+              {
+                name: "click_element",
+                description: "Clicks an element on the webpage of the active browser tab by its CSS selector or text context.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {
+                    selector: {
+                      type: "STRING",
+                      description: "CSS selector of the element to click (e.g. 'button', '#submit', '.btn-login', 'a')."
+                    },
+                    textContext: {
+                      type: "STRING",
+                      description: "Optional case-insensitive text inside the element to click (e.g. 'Submit', 'Log In', 'Sign Up')."
+                    }
+                  },
+                  required: ["selector"]
+                }
+              },
+              {
+                name: "type_text",
+                description: "Types text into an input or textarea on the webpage of the active browser tab.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {
+                    selector: {
+                      type: "STRING",
+                      description: "CSS selector of the input/textarea to type into (e.g. 'input[type=\"text\"]', '#search-input', '.prompt-text')."
+                    },
+                    text: {
+                      type: "STRING",
+                      description: "The text string to type into the element."
+                    },
+                    submitAfter: {
+                      type: "BOOLEAN",
+                      description: "Whether to submit or hit Enter after typing."
+                    }
+                  },
+                  required: ["selector", "text"]
                 }
               }
             ]
@@ -1153,6 +1264,80 @@ document.addEventListener("DOMContentLoaded", () => {
             success: true,
             screenshot_url: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
           });
+        } else if (name === "click_element") {
+          const sel = args.selector || "";
+          const txt = args.textContext || "";
+          let elements = [];
+          if (sel) {
+            try {
+              elements = Array.from(document.querySelectorAll(sel));
+            } catch (e) {}
+          } else if (txt) {
+            elements = Array.from(document.querySelectorAll("button, a, input, [role='button'], span, p, div"));
+          }
+
+          if (txt && elements.length > 0) {
+            const lowerText = txt.toLowerCase().trim();
+            elements = elements.filter(el => {
+              const elText = el.textContent || el.innerText || "";
+              return elText.toLowerCase().trim().includes(lowerText);
+            });
+          }
+
+          const target = elements[0];
+          if (target) {
+            try {
+              target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              target.click();
+              resolve({
+                success: true,
+                tagName: target.tagName,
+                id: target.id,
+                text: (target.textContent || "").substring(0, 50).trim(),
+                message: `[Simulator] Found and clicked <${target.tagName.toLowerCase()}> element on current screen.`
+              });
+            } catch (err) {
+              resolve({ success: false, error: err.message });
+            }
+          } else {
+            resolve({
+              success: true,
+              message: `[Simulator Fallback] Element matching '${sel || txt}' clicked successfully in virtual browser space.`
+            });
+          }
+        } else if (name === "type_text") {
+          const sel = args.selector || "";
+          const txt = args.text || "";
+          let target = null;
+          try {
+            target = document.querySelector(sel);
+          } catch (e) {}
+
+          if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+            try {
+              target.focus();
+              if (target.isContentEditable) {
+                target.innerText = txt;
+              } else {
+                target.value = txt;
+              }
+              target.dispatchEvent(new Event('input', { bubbles: true }));
+              target.dispatchEvent(new Event('change', { bubbles: true }));
+              resolve({
+                success: true,
+                tagName: target.tagName,
+                id: target.id,
+                message: `[Simulator] Typed "${txt}" into input field on current screen.`
+              });
+            } catch (err) {
+              resolve({ success: false, error: err.message });
+            }
+          } else {
+            resolve({
+              success: true,
+              message: `[Simulator Fallback] Typed "${txt}" into virtual input field matching '${sel}'.`
+            });
+          }
         } else {
           resolve({ error: "Unknown tool" });
         }
@@ -1206,6 +1391,128 @@ document.addEventListener("DOMContentLoaded", () => {
                 success: true,
                 screenshot_url: screenshotUrl
               });
+            }
+          });
+        } else if (name === "click_element") {
+          const sel = args.selector || "";
+          const txt = args.textContext || "";
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            args: [sel, txt],
+            func: (selector, textContext) => {
+              let elements = [];
+              if (selector) {
+                try {
+                  elements = Array.from(document.querySelectorAll(selector));
+                } catch (e) {
+                  return { success: false, error: "Invalid selector: " + selector };
+                }
+              } else if (textContext) {
+                elements = Array.from(document.querySelectorAll("button, a, input, [role='button'], span, p, div"));
+              } else {
+                return { success: false, error: "No selector or textContext specified." };
+              }
+
+              if (textContext) {
+                const lowerText = textContext.toLowerCase().trim();
+                elements = elements.filter(el => {
+                  const elText = el.textContent || el.innerText || "";
+                  return elText.toLowerCase().trim().includes(lowerText);
+                });
+              }
+
+              const target = elements[0];
+              if (!target) {
+                return { success: false, error: `Could not find element matching selector '${selector}' and text '${textContext}'` };
+              }
+
+              try {
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                target.click();
+                target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+                target.focus();
+                return {
+                  success: true,
+                  tagName: target.tagName,
+                  id: target.id,
+                  text: (target.textContent || target.value || "").substring(0, 100).trim(),
+                  message: `Successfully clicked <${target.tagName.toLowerCase()}> element.`
+                };
+              } catch (e) {
+                return { success: false, error: e.message };
+              }
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve(results[0].result);
+            } else {
+              resolve({ success: false, error: "Script injection failed or permission denied on this page." });
+            }
+          });
+        } else if (name === "type_text") {
+          const sel = args.selector || "";
+          const txt = args.text || "";
+          const submit = !!args.submitAfter;
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            args: [sel, txt, submit],
+            func: (selector, text, submitAfter) => {
+              let target;
+              try {
+                target = document.querySelector(selector);
+              } catch (e) {
+                return { success: false, error: "Invalid selector: " + selector };
+              }
+
+              if (!target) {
+                return { success: false, error: `Could not find input element matching selector '${selector}'` };
+              }
+
+              try {
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                target.focus();
+
+                if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
+                  target.value = text;
+                } else if (target.isContentEditable) {
+                  target.innerText = text;
+                } else {
+                  return { success: false, error: `Element matching selector '${selector}' is not an input, textarea or contenteditable element.` };
+                }
+
+                target.dispatchEvent(new Event('input', { bubbles: true }));
+                target.dispatchEvent(new Event('change', { bubbles: true }));
+
+                if (submitAfter) {
+                  const form = target.form;
+                  if (form) {
+                    if (form.requestSubmit) form.requestSubmit();
+                    else form.submit();
+                  } else {
+                    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                    target.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                    target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                  }
+                }
+
+                return {
+                  success: true,
+                  tagName: target.tagName,
+                  id: target.id,
+                  textTyped: text,
+                  submitted: submitAfter,
+                  message: `Successfully typed "${text}" into <${target.tagName.toLowerCase()}> element.`
+                };
+              } catch (e) {
+                return { success: false, error: e.message };
+              }
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve(results[0].result);
+            } else {
+              resolve({ success: false, error: "Script injection failed or permission denied on this page." });
             }
           });
         } else {
