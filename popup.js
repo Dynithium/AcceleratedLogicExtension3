@@ -924,10 +924,15 @@ document.addEventListener("DOMContentLoaded", () => {
           currentAssistantBubble.appendChild(toolStatus);
           scrollToBottom();
 
-          // 1. Add model's functionCall to chat history
+          // 1. Add model's functionCall to chat history (preserving thoughts text)
+          const modelParts = [];
+          if (accumulatedText.trim()) {
+            modelParts.push({ text: accumulatedText });
+          }
+          modelParts.push({ functionCall: activeFunctionCall });
           chatHistory.push({
             role: "model",
-            parts: [{ functionCall: activeFunctionCall }]
+            parts: modelParts
           });
 
           // 2. Execute the tool

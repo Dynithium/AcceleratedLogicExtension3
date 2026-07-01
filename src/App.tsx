@@ -2016,10 +2016,15 @@ export default function App() {
           if (activeFunctionCall) {
             hasMoreTurns = true;
 
-            // 1. Save model function call to local history
+            // 1. Save model function call to local history (preserving generated thoughts/text)
+            const modelParts: any[] = [];
+            if (accumulatedText.trim()) {
+              modelParts.push({ text: accumulatedText });
+            }
+            modelParts.push({ functionCall: activeFunctionCall });
             localHistory.push({
               role: "model",
-              parts: [{ functionCall: activeFunctionCall }]
+              parts: modelParts
             });
 
             // 2. Execute tool inside simulator
