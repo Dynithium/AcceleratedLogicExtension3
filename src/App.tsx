@@ -1409,6 +1409,129 @@ function parseThinkingAndContent(text: string) {
   };
 }
 
+// Generates a high-quality, valid mock JPEG browser screenshot to feed into Gemini API vision encoder
+function generateMockScreenshot(title: string, url: string, text: string): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = 800;
+  canvas.height = 600;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
+  // Background
+  ctx.fillStyle = "#0f172a"; // Slate-900
+  ctx.fillRect(0, 0, 800, 600);
+
+  // Browser top bar
+  ctx.fillStyle = "#1e293b"; // Slate-800
+  ctx.fillRect(0, 0, 800, 60);
+
+  // Browser address bar
+  ctx.fillStyle = "#0f172a"; // Slate-900
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(120, 12, 560, 36, 8);
+  } else {
+    ctx.rect(120, 12, 560, 36);
+  }
+  ctx.fill();
+
+  // Draw three color dots (browser controls)
+  ctx.fillStyle = "#ef4444"; // red
+  ctx.beginPath(); ctx.arc(25, 30, 6, 0, 2 * Math.PI); ctx.fill();
+  ctx.fillStyle = "#f59e0b"; // yellow
+  ctx.beginPath(); ctx.arc(45, 30, 6, 0, 2 * Math.PI); ctx.fill();
+  ctx.fillStyle = "#10b981"; // green
+  ctx.beginPath(); ctx.arc(65, 30, 6, 0, 2 * Math.PI); ctx.fill();
+
+  // Address text
+  ctx.fillStyle = "#94a3b8"; // Slate-400
+  ctx.font = "13px monospace";
+  ctx.fillText(url, 140, 34);
+
+  // Page Content Box
+  ctx.fillStyle = "#1e293b"; // Slate-800
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(40, 100, 720, 460, 16);
+  } else {
+    ctx.rect(40, 100, 720, 460);
+  }
+  ctx.fill();
+
+  // Header Icon/Badge
+  ctx.fillStyle = "#3b82f6"; // Blue
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(80, 140, 100, 100, 12);
+  } else {
+    ctx.rect(80, 140, 100, 100);
+  }
+  ctx.fill();
+  
+  // Icon letter
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 48px sans-serif";
+  ctx.fillText(title.charAt(0) || "W", 112, 208);
+
+  // Title
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 24px sans-serif";
+  ctx.fillText(title, 200, 180);
+
+  // Simulated Web URL subtitle
+  ctx.fillStyle = "#60a5fa"; // blue-400
+  ctx.font = "14px sans-serif";
+  ctx.fillText("Active Extension Simulator Viewport", 200, 210);
+
+  // Divider
+  ctx.strokeStyle = "#334155";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(80, 270);
+  ctx.lineTo(720, 270);
+  ctx.stroke();
+
+  // Text content wrapped
+  ctx.fillStyle = "#cbd5e1"; // Slate-300
+  ctx.font = "15px sans-serif";
+  const words = text.split(" ");
+  let line = "";
+  let y = 310;
+  const maxWidth = 640;
+  const lineHeight = 24;
+
+  for (let n = 0; n < words.length; n++) {
+    const testLine = line + words[n] + " ";
+    const metrics = ctx.measureText(testLine);
+    if (metrics.width > maxWidth && n > 0) {
+      ctx.fillText(line, 80, y);
+      line = words[n] + " ";
+      y += lineHeight;
+      if (y > 500) break;
+    } else {
+      line = testLine;
+    }
+  }
+  if (y <= 500) {
+    ctx.fillText(line, 80, y);
+  }
+
+  // Visual simulated button
+  ctx.fillStyle = "#3b82f6"; // blue button
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(80, Math.min(y + 20, 520), 160, 36, 6);
+  } else {
+    ctx.rect(80, Math.min(y + 20, 520), 160, 36);
+  }
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 13px sans-serif";
+  ctx.fillText("Interactive Action", 110, Math.min(y + 20, 520) + 22);
+
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<"simulator" | "install" | "explorer">("simulator");
   const [activeFile, setActiveFile] = useState<string>("manifest.json");
@@ -1902,11 +2025,15 @@ export default function App() {
             // 2. Execute tool inside simulator
             let toolOutput: any = null;
             if (activeFunctionCall.name === "get_page_dom") {
+              const defaultTab = SIM_MOCK_TABS[0];
+              const title = simAttachment?.domContext?.title || defaultTab.title;
+              const url = simAttachment?.domContext?.url || defaultTab.url;
+              const text = simAttachment?.domContext?.text || defaultTab.text;
               toolOutput = {
                 success: true,
-                title: "Gemini Extension Builder",
-                url: "https://gemini-extension-builder.ai.studio",
-                text: "Gemini Extension Builder is an advanced workbench to package custom Manifest V3 extensions. The app facilitates in-browser compilation of manifest.json, popup.html, popup.css, and popup.js into a packed ZIP folder. Built on June 2026, it uses React, Tailwind v4 and local JSZip compiler."
+                title,
+                url,
+                text
               };
             } else if (activeFunctionCall.name === "get_page_screenshot") {
               toolOutput = {
@@ -2016,10 +2143,16 @@ export default function App() {
             ];
 
             if (activeFunctionCall.name === "get_page_screenshot") {
+              const defaultTab = SIM_MOCK_TABS[0];
+              const tabTitle = simAttachment?.domContext?.title || defaultTab.title;
+              const tabUrl = simAttachment?.domContext?.url || defaultTab.url;
+              const tabText = simAttachment?.domContext?.text || defaultTab.text;
+              const base64Url = generateMockScreenshot(tabTitle, tabUrl, tabText);
+              const cleanBase64 = base64Url.split(",")[1];
               responseParts.push({
                 inlineData: {
                   mimeType: "image/jpeg",
-                  data: "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
+                  data: cleanBase64
                 }
               });
             }
