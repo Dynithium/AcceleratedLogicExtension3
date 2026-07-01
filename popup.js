@@ -1013,7 +1013,7 @@ document.addEventListener("DOMContentLoaded", () => {
           }
 
           chatHistory.push({
-            role: "user",
+            role: "function",
             parts: responseParts
           });
 
@@ -1661,28 +1661,34 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Parses thinking blocks out of the text content
   function parseThinkingAndContent(text) {
-    let thinking = "";
-    let content = text;
+    const thinkingParts = [];
+    let content = "";
     
     const thinkingStartTag = "<thinking>";
     const thinkingEndTag = "</thinking>";
     
-    const startIndex = text.indexOf(thinkingStartTag);
-    if (startIndex !== -1) {
-      const endIndex = text.indexOf(thinkingEndTag);
-      if (endIndex !== -1) {
-        // Complete thinking block
-        thinking = text.substring(startIndex + thinkingStartTag.length, endIndex);
-        content = text.substring(0, startIndex) + text.substring(endIndex + thinkingEndTag.length);
+    let currentText = text;
+    
+    while (currentText.length > 0) {
+      const startIndex = currentText.indexOf(thinkingStartTag);
+      if (startIndex !== -1) {
+        content += currentText.substring(0, startIndex);
+        const endIndex = currentText.indexOf(thinkingEndTag, startIndex + thinkingStartTag.length);
+        if (endIndex !== -1) {
+          thinkingParts.push(currentText.substring(startIndex + thinkingStartTag.length, endIndex));
+          currentText = currentText.substring(endIndex + thinkingEndTag.length);
+        } else {
+          thinkingParts.push(currentText.substring(startIndex + thinkingStartTag.length));
+          currentText = "";
+        }
       } else {
-        // Thinking block is still open (streaming)
-        thinking = text.substring(startIndex + thinkingStartTag.length);
-        content = text.substring(0, startIndex);
+        content += currentText;
+        break;
       }
     }
     
     return {
-      thinking: thinking.trim(),
+      thinking: thinkingParts.map(t => t.trim()).filter(Boolean).join("\n\n"),
       content: content.trim()
     };
   }
@@ -1763,7 +1769,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Render chat history from local storage
   function renderHistory() {
+    chatLog.innerHTML = "";
     chatHistory.forEach(msg => {
+      // Skip rendering intermediate tool-call/response messages that have no text and no inlineData attachments
+      const hasRenderableContent = msg.parts && msg.parts.some(part => part.text || part.inlineData);
+      if (!hasRenderableContent) {
+        return;
+      }
+
       const bubble = document.createElement("div");
       bubble.className = `message-bubble ${msg.role === 'user' ? 'user' : 'assistant'}`;
 
