@@ -2171,7 +2171,7 @@ export default function App() {
             }
 
             localHistory.push({
-              role: "function",
+              role: "user",
               parts: responseParts
             });
 

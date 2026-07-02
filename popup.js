@@ -1013,7 +1013,7 @@ document.addEventListener("DOMContentLoaded", () => {
           }
 
           chatHistory.push({
-            role: "function",
+            role: "user",
             parts: responseParts
           });
 
