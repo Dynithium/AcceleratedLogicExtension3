@@ -814,6 +814,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const reader = response.body.getReader();
         const decoder = new TextDecoder("utf-8");
         let accumulatedText = "";
+        let rawModelParts = [];
         let buffer = "";
         let inThinkingBlock = false;
 
@@ -869,6 +870,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const obj = JSON.parse(jsonStr);
                 const parts = obj.candidates?.[0]?.content?.parts;
                 if (parts) {
+                  rawModelParts.push(...parts);
                   for (const part of parts) {
                     if (part.text) {
                       const isThought = !!part.thought;
@@ -924,15 +926,10 @@ document.addEventListener("DOMContentLoaded", () => {
           currentAssistantBubble.appendChild(toolStatus);
           scrollToBottom();
 
-          // 1. Add model's functionCall to chat history (preserving thoughts text)
-          const modelParts = [];
-          if (accumulatedText.trim()) {
-            modelParts.push({ text: accumulatedText });
-          }
-          modelParts.push({ functionCall: activeFunctionCall });
+          // 1. Add model's functionCall to chat history (preserving thoughts text and signatures)
           chatHistory.push({
             role: "model",
-            parts: modelParts
+            parts: rawModelParts
           });
 
           // 2. Execute the tool
@@ -1033,7 +1030,7 @@ document.addEventListener("DOMContentLoaded", () => {
           // Append assistant response to history list
           chatHistory.push({
             role: "model",
-            parts: [{ text: accumulatedText }]
+            parts: rawModelParts
           });
 
           // Save history to local storage

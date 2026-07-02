@@ -1937,6 +1937,7 @@ export default function App() {
           const reader = response.body.getReader();
           const decoder = new TextDecoder("utf-8");
           let accumulatedText = "";
+          let rawModelParts: any[] = [];
           let buffer = "";
           let inThinkingBlock = false;
 
@@ -1977,6 +1978,7 @@ export default function App() {
                   const obj = JSON.parse(jsonStr);
                   const parts = obj.candidates?.[0]?.content?.parts;
                   if (parts) {
+                    rawModelParts.push(...parts);
                     for (const part of parts) {
                       if (part.text) {
                         const isThought = !!part.thought;
@@ -2024,15 +2026,10 @@ export default function App() {
           if (activeFunctionCall) {
             hasMoreTurns = true;
 
-            // 1. Save model function call to local history (preserving generated thoughts/text)
-            const modelParts: any[] = [];
-            if (accumulatedText.trim()) {
-              modelParts.push({ text: accumulatedText });
-            }
-            modelParts.push({ functionCall: activeFunctionCall });
+            // 1. Save model function call to local history (preserving generated thoughts/text and signatures)
             localHistory.push({
               role: "model",
-              parts: modelParts
+              parts: rawModelParts
             });
 
             // 2. Execute tool inside simulator
@@ -2182,7 +2179,7 @@ export default function App() {
             // standard end of generation
             localHistory.push({
               role: "model",
-              parts: [{ text: accumulatedText }]
+              parts: rawModelParts
             });
           }
         }
