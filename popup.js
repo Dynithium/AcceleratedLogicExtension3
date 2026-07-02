@@ -1406,13 +1406,61 @@ document.addEventListener("DOMContentLoaded", () => {
   // Context extraction tool executor
   function executeTool(name, args) {
     return new Promise(async (resolve) => {
-      const simulateTyping = async (target, text, submit) => {
-        if (!target) return;
+      const simulateTyping = async (initialTarget, text, submit) => {
+        if (!initialTarget) return;
+
+        // 1. Give focus-shifting events a moment to settle
+        await new Promise((r) => setTimeout(r, 20));
+
+        // 2. Determine actual input/editing target
+        let target = initialTarget;
+        if (document.activeElement && (
+          document.activeElement.tagName === "INPUT" ||
+          document.activeElement.tagName === "TEXTAREA" ||
+          document.activeElement.isContentEditable ||
+          document.activeElement.getAttribute('role') === 'textbox' ||
+          document.activeElement.classList.contains('docs-textarea')
+        )) {
+          target = document.activeElement;
+        } else {
+          const docTextarea = document.querySelector('.docs-textarea');
+          if (docTextarea) {
+            target = docTextarea;
+          }
+        }
+
         target.focus();
 
+        // 3. Special handling for Google Docs (.docs-textarea)
+        const isGoogleDocs = target.classList.contains('docs-textarea') || 
+                             window.location.hostname.includes('docs.google.com') ||
+                             document.querySelector('.docs-textarea') !== null;
+
+        if (isGoogleDocs) {
+          try {
+            const dataTransfer = new DataTransfer();
+            dataTransfer.setData('text/plain', text);
+            const pasteEvent = new ClipboardEvent('paste', {
+              bubbles: true,
+              cancelable: true,
+              clipboardData: dataTransfer
+            });
+            target.dispatchEvent(pasteEvent);
+            target.dispatchEvent(new Event('input', { bubbles: true }));
+            target.dispatchEvent(new Event('change', { bubbles: true }));
+            if (submit) {
+              const activeEl = document.activeElement || target;
+              activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+            }
+            return;
+          } catch (err) {}
+        }
+
+        // 4. Character by character typing fallback
         for (let i = 0; i < text.length; i++) {
           const char = text[i];
-          const keyCode = char.charCodeAt(0);
+          const charCode = char.charCodeAt(0);
+          const keyCode = char.toUpperCase().charCodeAt(0);
 
           // Keydown
           const keydownEvent = new KeyboardEvent('keydown', {
@@ -1425,7 +1473,7 @@ document.addEventListener("DOMContentLoaded", () => {
           });
           target.dispatchEvent(keydownEvent);
 
-          // BeforeInput (crucial for rich text editors, Slate, Lexical, Google Docs, etc.)
+          // BeforeInput
           let beforeInputAllowed = true;
           try {
             const beforeInputEvent = new InputEvent('beforeinput', {
@@ -1442,7 +1490,15 @@ document.addEventListener("DOMContentLoaded", () => {
               const start = target.selectionStart || 0;
               const end = target.selectionEnd || 0;
               const oldVal = target.value;
-              target.value = oldVal.substring(0, start) + char + oldVal.substring(end);
+              const newVal = oldVal.substring(0, start) + char + oldVal.substring(end);
+              
+              const prototype = Object.getPrototypeOf(target);
+              const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+              if (setter) {
+                setter.call(target, newVal);
+              } else {
+                target.value = newVal;
+              }
               target.selectionStart = target.selectionEnd = start + 1;
             } else {
               const targetEditable = target.isContentEditable ? target : (
@@ -1455,28 +1511,44 @@ document.addEventListener("DOMContentLoaded", () => {
 
               if (targetEditable) {
                 targetEditable.focus();
+                
+                let textEventHandled = false;
                 try {
-                  const selection = window.getSelection();
-                  if (selection && selection.rangeCount > 0) {
-                    const range = selection.getRangeAt(0);
-                    range.deleteContents();
-                    const textNode = document.createTextNode(char);
-                    range.insertNode(textNode);
-                    range.setStartAfter(textNode);
-                    range.setEndAfter(textNode);
-                    selection.removeAllRanges();
-                    selection.addRange(range);
-                  } else {
-                    document.execCommand('insertText', false, char);
-                  }
-                } catch (err) {
+                  const textEvent = document.createEvent('TextEvent');
+                  textEvent.initTextEvent('textInput', true, true, window, char, 0, 'en-US');
+                  textEventHandled = targetEditable.dispatchEvent(textEvent);
+                } catch (e) {}
+
+                if (!textEventHandled) {
                   try {
-                    document.execCommand('insertText', false, char);
-                  } catch (e2) {
-                    targetEditable.innerText += char;
+                    const selection = window.getSelection();
+                    if (selection && selection.rangeCount > 0) {
+                      const range = selection.getRangeAt(0);
+                      range.deleteContents();
+                      const textNode = document.createTextNode(char);
+                      range.insertNode(textNode);
+                      range.setStartAfter(textNode);
+                      range.setEndAfter(textNode);
+                      selection.removeAllRanges();
+                      selection.addRange(range);
+                    } else {
+                      document.execCommand('insertText', false, char);
+                    }
+                  } catch (err) {
+                    try {
+                      document.execCommand('insertText', false, char);
+                    } catch (e2) {
+                      targetEditable.innerText += char;
+                    }
                   }
                 }
               } else {
+                try {
+                  const textEvent = document.createEvent('TextEvent');
+                  textEvent.initTextEvent('textInput', true, true, window, char, 0, 'en-US');
+                  target.dispatchEvent(textEvent);
+                } catch (e) {}
+
                 try {
                   document.execCommand('insertText', false, char);
                 } catch (err) {
@@ -1502,8 +1574,8 @@ document.addEventListener("DOMContentLoaded", () => {
           const keypressEvent = new KeyboardEvent('keypress', {
             key: char,
             code: `Key${char.toUpperCase()}`,
-            keyCode: keyCode,
-            which: keyCode,
+            keyCode: charCode,
+            which: charCode,
             bubbles: true,
             cancelable: true
           });
@@ -1873,13 +1945,61 @@ document.addEventListener("DOMContentLoaded", () => {
                 return { success: false, error: `Could not find any element at coordinates (${coordX}, ${coordY})` };
               }
 
-              const simulateTyping = async (target, text, submit) => {
-                if (!target) return;
+              const simulateTyping = async (initialTarget, text, submit) => {
+                if (!initialTarget) return;
+
+                // 1. Give focus-shifting events a moment to settle
+                await new Promise((r) => setTimeout(r, 20));
+
+                // 2. Determine actual input/editing target
+                let target = initialTarget;
+                if (document.activeElement && (
+                  document.activeElement.tagName === "INPUT" ||
+                  document.activeElement.tagName === "TEXTAREA" ||
+                  document.activeElement.isContentEditable ||
+                  document.activeElement.getAttribute('role') === 'textbox' ||
+                  document.activeElement.classList.contains('docs-textarea')
+                )) {
+                  target = document.activeElement;
+                } else {
+                  const docTextarea = document.querySelector('.docs-textarea');
+                  if (docTextarea) {
+                    target = docTextarea;
+                  }
+                }
+
                 target.focus();
 
+                // 3. Special handling for Google Docs (.docs-textarea)
+                const isGoogleDocs = target.classList.contains('docs-textarea') || 
+                                     window.location.hostname.includes('docs.google.com') ||
+                                     document.querySelector('.docs-textarea') !== null;
+
+                if (isGoogleDocs) {
+                  try {
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.setData('text/plain', text);
+                    const pasteEvent = new ClipboardEvent('paste', {
+                      bubbles: true,
+                      cancelable: true,
+                      clipboardData: dataTransfer
+                    });
+                    target.dispatchEvent(pasteEvent);
+                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                    if (submit) {
+                      const activeEl = document.activeElement || target;
+                      activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                    }
+                    return;
+                  } catch (err) {}
+                }
+
+                // 4. Character by character typing fallback
                 for (let i = 0; i < text.length; i++) {
                   const char = text[i];
-                  const keyCode = char.charCodeAt(0);
+                  const charCode = char.charCodeAt(0);
+                  const keyCode = char.toUpperCase().charCodeAt(0);
 
                   // Keydown
                   const keydownEvent = new KeyboardEvent('keydown', {
@@ -1892,7 +2012,7 @@ document.addEventListener("DOMContentLoaded", () => {
                   });
                   target.dispatchEvent(keydownEvent);
 
-                  // BeforeInput (crucial for rich text editors, Slate, Lexical, Google Docs, etc.)
+                  // BeforeInput
                   let beforeInputAllowed = true;
                   try {
                     const beforeInputEvent = new InputEvent('beforeinput', {
@@ -1909,7 +2029,15 @@ document.addEventListener("DOMContentLoaded", () => {
                       const start = target.selectionStart || 0;
                       const end = target.selectionEnd || 0;
                       const oldVal = target.value;
-                      target.value = oldVal.substring(0, start) + char + oldVal.substring(end);
+                      const newVal = oldVal.substring(0, start) + char + oldVal.substring(end);
+                      
+                      const prototype = Object.getPrototypeOf(target);
+                      const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                      if (setter) {
+                        setter.call(target, newVal);
+                      } else {
+                        target.value = newVal;
+                      }
                       target.selectionStart = target.selectionEnd = start + 1;
                     } else {
                       const targetEditable = target.isContentEditable ? target : (
@@ -1922,24 +2050,44 @@ document.addEventListener("DOMContentLoaded", () => {
 
                       if (targetEditable) {
                         targetEditable.focus();
+                        
+                        let textEventHandled = false;
                         try {
-                          const selection = window.getSelection();
-                          if (selection) {
-                            const range = document.createRange();
-                            range.selectNodeContents(targetEditable);
-                            range.collapse(false);
-                            selection.removeAllRanges();
-                            selection.addRange(range);
-                          }
-                          document.execCommand('insertText', false, char);
-                        } catch (err) {
+                          const textEvent = document.createEvent('TextEvent');
+                          textEvent.initTextEvent('textInput', true, true, window, char, 0, 'en-US');
+                          textEventHandled = targetEditable.dispatchEvent(textEvent);
+                        } catch (e) {}
+
+                        if (!textEventHandled) {
                           try {
-                            document.execCommand('insertText', false, char);
-                          } catch (e2) {
-                            targetEditable.innerText += char;
+                            const selection = window.getSelection();
+                            if (selection && selection.rangeCount > 0) {
+                              const range = selection.getRangeAt(0);
+                              range.deleteContents();
+                              const textNode = document.createTextNode(char);
+                              range.insertNode(textNode);
+                              range.setStartAfter(textNode);
+                              range.setEndAfter(textNode);
+                              selection.removeAllRanges();
+                              selection.addRange(range);
+                            } else {
+                              document.execCommand('insertText', false, char);
+                            }
+                          } catch (err) {
+                            try {
+                              document.execCommand('insertText', false, char);
+                            } catch (e2) {
+                              targetEditable.innerText += char;
+                            }
                           }
                         }
                       } else {
+                        try {
+                          const textEvent = document.createEvent('TextEvent');
+                          textEvent.initTextEvent('textInput', true, true, window, char, 0, 'en-US');
+                          target.dispatchEvent(textEvent);
+                        } catch (e) {}
+
                         try {
                           document.execCommand('insertText', false, char);
                         } catch (err) {
@@ -1965,8 +2113,8 @@ document.addEventListener("DOMContentLoaded", () => {
                   const keypressEvent = new KeyboardEvent('keypress', {
                     key: char,
                     code: `Key${char.toUpperCase()}`,
-                    keyCode: keyCode,
-                    which: keyCode,
+                    keyCode: charCode,
+                    which: charCode,
                     bubbles: true,
                     cancelable: true
                   });
@@ -2050,13 +2198,61 @@ document.addEventListener("DOMContentLoaded", () => {
                 return { success: false, error: `Could not find input element matching selector '${selector}'` };
               }
 
-              const simulateTyping = async (target, text, submit) => {
-                if (!target) return;
+              const simulateTyping = async (initialTarget, text, submit) => {
+                if (!initialTarget) return;
+
+                // 1. Give focus-shifting events a moment to settle
+                await new Promise((r) => setTimeout(r, 20));
+
+                // 2. Determine actual input/editing target
+                let target = initialTarget;
+                if (document.activeElement && (
+                  document.activeElement.tagName === "INPUT" ||
+                  document.activeElement.tagName === "TEXTAREA" ||
+                  document.activeElement.isContentEditable ||
+                  document.activeElement.getAttribute('role') === 'textbox' ||
+                  document.activeElement.classList.contains('docs-textarea')
+                )) {
+                  target = document.activeElement;
+                } else {
+                  const docTextarea = document.querySelector('.docs-textarea');
+                  if (docTextarea) {
+                    target = docTextarea;
+                  }
+                }
+
                 target.focus();
 
+                // 3. Special handling for Google Docs (.docs-textarea)
+                const isGoogleDocs = target.classList.contains('docs-textarea') || 
+                                     window.location.hostname.includes('docs.google.com') ||
+                                     document.querySelector('.docs-textarea') !== null;
+
+                if (isGoogleDocs) {
+                  try {
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.setData('text/plain', text);
+                    const pasteEvent = new ClipboardEvent('paste', {
+                      bubbles: true,
+                      cancelable: true,
+                      clipboardData: dataTransfer
+                    });
+                    target.dispatchEvent(pasteEvent);
+                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                    if (submit) {
+                      const activeEl = document.activeElement || target;
+                      activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                    }
+                    return;
+                  } catch (err) {}
+                }
+
+                // 4. Character by character typing fallback
                 for (let i = 0; i < text.length; i++) {
                   const char = text[i];
-                  const keyCode = char.charCodeAt(0);
+                  const charCode = char.charCodeAt(0);
+                  const keyCode = char.toUpperCase().charCodeAt(0);
 
                   // Keydown
                   const keydownEvent = new KeyboardEvent('keydown', {
@@ -2069,7 +2265,7 @@ document.addEventListener("DOMContentLoaded", () => {
                   });
                   target.dispatchEvent(keydownEvent);
 
-                  // BeforeInput (crucial for rich text editors, Slate, Lexical, Google Docs, etc.)
+                  // BeforeInput
                   let beforeInputAllowed = true;
                   try {
                     const beforeInputEvent = new InputEvent('beforeinput', {
@@ -2086,7 +2282,15 @@ document.addEventListener("DOMContentLoaded", () => {
                       const start = target.selectionStart || 0;
                       const end = target.selectionEnd || 0;
                       const oldVal = target.value;
-                      target.value = oldVal.substring(0, start) + char + oldVal.substring(end);
+                      const newVal = oldVal.substring(0, start) + char + oldVal.substring(end);
+                      
+                      const prototype = Object.getPrototypeOf(target);
+                      const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                      if (setter) {
+                        setter.call(target, newVal);
+                      } else {
+                        target.value = newVal;
+                      }
                       target.selectionStart = target.selectionEnd = start + 1;
                     } else {
                       const targetEditable = target.isContentEditable ? target : (
@@ -2099,24 +2303,44 @@ document.addEventListener("DOMContentLoaded", () => {
 
                       if (targetEditable) {
                         targetEditable.focus();
+                        
+                        let textEventHandled = false;
                         try {
-                          const selection = window.getSelection();
-                          if (selection) {
-                            const range = document.createRange();
-                            range.selectNodeContents(targetEditable);
-                            range.collapse(false);
-                            selection.removeAllRanges();
-                            selection.addRange(range);
-                          }
-                          document.execCommand('insertText', false, char);
-                        } catch (err) {
+                          const textEvent = document.createEvent('TextEvent');
+                          textEvent.initTextEvent('textInput', true, true, window, char, 0, 'en-US');
+                          textEventHandled = targetEditable.dispatchEvent(textEvent);
+                        } catch (e) {}
+
+                        if (!textEventHandled) {
                           try {
-                            document.execCommand('insertText', false, char);
-                          } catch (e2) {
-                            targetEditable.innerText += char;
+                            const selection = window.getSelection();
+                            if (selection && selection.rangeCount > 0) {
+                              const range = selection.getRangeAt(0);
+                              range.deleteContents();
+                              const textNode = document.createTextNode(char);
+                              range.insertNode(textNode);
+                              range.setStartAfter(textNode);
+                              range.setEndAfter(textNode);
+                              selection.removeAllRanges();
+                              selection.addRange(range);
+                            } else {
+                              document.execCommand('insertText', false, char);
+                            }
+                          } catch (err) {
+                            try {
+                              document.execCommand('insertText', false, char);
+                            } catch (e2) {
+                              targetEditable.innerText += char;
+                            }
                           }
                         }
                       } else {
+                        try {
+                          const textEvent = document.createEvent('TextEvent');
+                          textEvent.initTextEvent('textInput', true, true, window, char, 0, 'en-US');
+                          target.dispatchEvent(textEvent);
+                        } catch (e) {}
+
                         try {
                           document.execCommand('insertText', false, char);
                         } catch (err) {
@@ -2142,8 +2366,8 @@ document.addEventListener("DOMContentLoaded", () => {
                   const keypressEvent = new KeyboardEvent('keypress', {
                     key: char,
                     code: `Key${char.toUpperCase()}`,
-                    keyCode: keyCode,
-                    which: keyCode,
+                    keyCode: charCode,
+                    which: charCode,
                     bubbles: true,
                     cancelable: true
                   });

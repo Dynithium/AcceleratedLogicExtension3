@@ -2066,13 +2066,64 @@ export default function App() {
             // 2. Execute tool inside simulator
             let toolOutput: any = null;
 
-            const simulateTyping = async (target: HTMLElement, text: string, submit: boolean) => {
-              if (!target) return;
+            const simulateTyping = async (initialTarget: HTMLElement, text: string, submit: boolean) => {
+              if (!initialTarget) return;
+
+              // 1. Give any focus-shifting click event handlers a moment to settle
+              await new Promise((r) => setTimeout(r, 20));
+
+              // 2. Determine the actual input/editing target
+              let target = initialTarget;
+              if (document.activeElement && (
+                document.activeElement.tagName === "INPUT" ||
+                document.activeElement.tagName === "TEXTAREA" ||
+                (document.activeElement as HTMLElement).isContentEditable ||
+                document.activeElement.getAttribute('role') === 'textbox' ||
+                document.activeElement.classList.contains('docs-textarea')
+              )) {
+                target = document.activeElement as HTMLElement;
+              } else {
+                const docTextarea = document.querySelector('.docs-textarea') as HTMLElement | null;
+                if (docTextarea) {
+                  target = docTextarea;
+                }
+              }
+
               target.focus();
 
+              // 3. Special handling for Google Docs (.docs-textarea) or when inside a Google Docs iframe/page
+              const isGoogleDocs = target.classList.contains('docs-textarea') || 
+                                   window.location.hostname.includes('docs.google.com') ||
+                                   document.querySelector('.docs-textarea') !== null;
+
+              if (isGoogleDocs) {
+                try {
+                  // For Google Docs, synthetic paste event is the silver-bullet standard.
+                  const dataTransfer = new DataTransfer();
+                  dataTransfer.setData('text/plain', text);
+                  const pasteEvent = new ClipboardEvent('paste', {
+                    bubbles: true,
+                    cancelable: true,
+                    clipboardData: dataTransfer
+                  });
+                  target.dispatchEvent(pasteEvent);
+                  target.dispatchEvent(new Event('input', { bubbles: true }));
+                  
+                  // Also trigger change event and submit if requested
+                  target.dispatchEvent(new Event('change', { bubbles: true }));
+                  if (submit) {
+                    const activeEl = document.activeElement || target;
+                    activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                  }
+                  return;
+                } catch (err) {}
+              }
+
+              // 4. Fallback character-by-character typing for standard/rich editors
               for (let i = 0; i < text.length; i++) {
                 const char = text[i];
-                const keyCode = char.charCodeAt(0);
+                const charCode = char.charCodeAt(0);
+                const keyCode = char.toUpperCase().charCodeAt(0);
 
                 // Keydown
                 const keydownEvent = new KeyboardEvent('keydown', {
@@ -2085,7 +2136,7 @@ export default function App() {
                 });
                 target.dispatchEvent(keydownEvent);
 
-                // BeforeInput (crucial for rich text editors, Slate, Lexical, Google Docs, etc.)
+                // BeforeInput (crucial for rich text editors, Slate, Lexical, Quill, etc.)
                 let beforeInputAllowed = true;
                 try {
                   const beforeInputEvent = new InputEvent('beforeinput', {
@@ -2103,7 +2154,16 @@ export default function App() {
                     const start = el.selectionStart || 0;
                     const end = el.selectionEnd || 0;
                     const oldVal = el.value;
-                    el.value = oldVal.substring(0, start) + char + oldVal.substring(end);
+                    const newVal = oldVal.substring(0, start) + char + oldVal.substring(end);
+                    
+                    // Bypass framework property overrides (React / Vue virtual DOM setters)
+                    const prototype = Object.getPrototypeOf(el);
+                    const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                    if (setter) {
+                      setter.call(el, newVal);
+                    } else {
+                      el.value = newVal;
+                    }
                     el.selectionStart = el.selectionEnd = start + 1;
                   } else {
                     const targetEditable = (target.isContentEditable ? target : (
@@ -2116,28 +2176,45 @@ export default function App() {
 
                     if (targetEditable) {
                       targetEditable.focus();
+                      
+                      // Try Webkit/Blink TextEvent (extremely powerful for custom rich editors)
+                      let textEventHandled = false;
                       try {
-                        const selection = window.getSelection();
-                        if (selection && selection.rangeCount > 0) {
-                          const range = selection.getRangeAt(0);
-                          range.deleteContents();
-                          const textNode = document.createTextNode(char);
-                          range.insertNode(textNode);
-                          range.setStartAfter(textNode);
-                          range.setEndAfter(textNode);
-                          selection.removeAllRanges();
-                          selection.addRange(range);
-                        } else {
-                          document.execCommand('insertText', false, char);
-                        }
-                      } catch (err) {
+                        const textEvent = document.createEvent('TextEvent');
+                        (textEvent as any).initTextEvent('textInput', true, true, window, char, 0, 'en-US');
+                        textEventHandled = targetEditable.dispatchEvent(textEvent);
+                      } catch (e) {}
+
+                      if (!textEventHandled) {
                         try {
-                          document.execCommand('insertText', false, char);
-                        } catch (e2) {
-                          targetEditable.innerText += char;
+                          const selection = window.getSelection();
+                          if (selection && selection.rangeCount > 0) {
+                            const range = selection.getRangeAt(0);
+                            range.deleteContents();
+                            const textNode = document.createTextNode(char);
+                            range.insertNode(textNode);
+                            range.setStartAfter(textNode);
+                            range.setEndAfter(textNode);
+                            selection.removeAllRanges();
+                            selection.addRange(range);
+                          } else {
+                            document.execCommand('insertText', false, char);
+                          }
+                        } catch (err) {
+                          try {
+                            document.execCommand('insertText', false, char);
+                          } catch (e2) {
+                            targetEditable.innerText += char;
+                          }
                         }
                       }
                     } else {
+                      try {
+                        const textEvent = document.createEvent('TextEvent');
+                        (textEvent as any).initTextEvent('textInput', true, true, window, char, 0, 'en-US');
+                        target.dispatchEvent(textEvent);
+                      } catch (e) {}
+
                       try {
                         document.execCommand('insertText', false, char);
                       } catch (err) {
@@ -2163,8 +2240,8 @@ export default function App() {
                 const keypressEvent = new KeyboardEvent('keypress', {
                   key: char,
                   code: `Key${char.toUpperCase()}`,
-                  keyCode: keyCode,
-                  which: keyCode,
+                  keyCode: charCode,
+                  which: charCode,
                   bubbles: true,
                   cancelable: true
                 });
