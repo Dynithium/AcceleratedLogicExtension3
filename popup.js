@@ -824,7 +824,7 @@ document.addEventListener("DOMContentLoaded", () => {
           }]
         };
 
-        const response = await fetch(url, {
+        const response = await fetchWithBackoff(url, {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -947,14 +947,68 @@ document.addEventListener("DOMContentLoaded", () => {
             currentLoaderDiv.remove();
           }
 
-          // Show status spinner in bubble
-          const toolStatus = document.createElement("div");
-          toolStatus.className = "tool-status-indicator";
-          toolStatus.innerHTML = `
-            <div class="spinner"></div>
-            <span>AI called <code>${activeFunctionCall.name}()</code>. Fetching active context...</span>
+          // Show/Update collapsible tools-block in current assistant bubble
+          let toolsBlock = currentAssistantBubble.querySelector(".tools-block");
+          if (!toolsBlock) {
+            toolsBlock = document.createElement("div");
+            toolsBlock.className = "tools-block expanded";
+            
+            const toggleBtn = document.createElement("button");
+            toggleBtn.className = "tools-toggle-btn";
+            toggleBtn.type = "button";
+            toggleBtn.innerHTML = `
+              <span class="tools-header-left">
+                <span class="tools-icon">🛠️</span>
+                <span class="tools-text">Tool Executions (1)</span>
+              </span>
+              <span class="tools-arrow">▼</span>
+            `;
+            
+            const contentDiv = document.createElement("div");
+            contentDiv.className = "tools-content";
+            
+            toolsBlock.appendChild(toggleBtn);
+            toolsBlock.appendChild(contentDiv);
+            
+            toggleBtn.addEventListener("click", () => {
+              toolsBlock.classList.toggle("collapsed");
+              toolsBlock.classList.toggle("expanded");
+            });
+
+            // Insert after thinking-block if it exists, otherwise after message-header
+            const thinkingBlock = currentAssistantBubble.querySelector(".thinking-block");
+            if (thinkingBlock && thinkingBlock.nextSibling) {
+              currentAssistantBubble.insertBefore(toolsBlock, thinkingBlock.nextSibling);
+            } else {
+              const header = currentAssistantBubble.querySelector(".message-header");
+              if (header && header.nextSibling) {
+                currentAssistantBubble.insertBefore(toolsBlock, header.nextSibling);
+              } else {
+                currentAssistantBubble.appendChild(toolsBlock);
+              }
+            }
+          }
+
+          const contentDiv = toolsBlock.querySelector(".tools-content");
+          const toolCallId = "tc-" + Date.now();
+          const toolItem = document.createElement("div");
+          toolItem.className = "tool-item-log";
+          toolItem.id = toolCallId;
+          toolItem.innerHTML = `
+            <div class="tool-item-header">
+              <span class="tool-item-name">${activeFunctionCall.name}()</span>
+              <span class="tool-item-status-spinner">⏳ Running...</span>
+            </div>
+            <div class="tool-item-response font-mono">Pending execution...</div>
           `;
-          currentAssistantBubble.appendChild(toolStatus);
+          contentDiv.appendChild(toolItem);
+          
+          // Update the count in toggle button
+          const count = contentDiv.querySelectorAll(".tool-item-log").length;
+          const toolsText = toolsBlock.querySelector(".tools-text");
+          if (toolsText) {
+            toolsText.textContent = `Tool Executions (${count})`;
+          }
           scrollToBottom();
 
           // 1. Add model's functionCall to chat history (preserving thoughts text and signatures)
@@ -966,14 +1020,27 @@ document.addEventListener("DOMContentLoaded", () => {
           // 2. Execute the tool
           const toolResult = await executeTool(activeFunctionCall.name, activeFunctionCall.args);
 
-          // Remove the status spinner
-          toolStatus.remove();
-
-          // Show tool success tag
-          const toolSuccessMsg = document.createElement("div");
-          toolSuccessMsg.className = "tool-success-note";
-          toolSuccessMsg.innerHTML = `⚙️ Executed tool <code>${activeFunctionCall.name}</code> successfully.`;
-          currentAssistantBubble.appendChild(toolSuccessMsg);
+          // Update toolItem log on success/failure
+          const statusSpinner = toolItem.querySelector(".tool-item-status-spinner");
+          if (statusSpinner) {
+            statusSpinner.textContent = "✅ Success";
+            statusSpinner.className = "tool-item-status-success";
+          }
+          
+          const responseDiv = toolItem.querySelector(".tool-item-response");
+          if (responseDiv) {
+            let note = "Execution complete.";
+            if (activeFunctionCall.name === "get_page_dom") {
+              note = `Context loaded successfully! URL: ${toolResult.url || ""}`;
+            } else if (activeFunctionCall.name === "click_element") {
+              note = `Element <${toolResult.tagName?.toLowerCase() || "element"}> clicked.`;
+            } else if (activeFunctionCall.name === "click_at_coordinate") {
+              note = `Clicked coordinate (${activeFunctionCall.args?.x || 0}, ${activeFunctionCall.args?.y || 0}).`;
+            } else if (activeFunctionCall.name === "type_text") {
+              note = `Typed text: "${activeFunctionCall.args?.text || ""}"`;
+            }
+            responseDiv.textContent = note;
+          }
           scrollToBottom();
 
           // 3. Add functionResponse to chat history (with image attachment if it's get_page_screenshot)
@@ -2675,5 +2742,32 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function scrollToBottom() {
     chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  async function fetchWithBackoff(url, options, maxAttempts = 3, initialDelayMs = 1000, backoffFactor = 2) {
+    let attempt = 0;
+    while (true) {
+      try {
+        const response = await fetch(url, options);
+        if (response.ok) {
+          return response;
+        }
+        const isRetriable = response.status === 429 || (response.status >= 500 && response.status < 600);
+        if (!isRetriable || attempt >= maxAttempts - 1) {
+          return response;
+        }
+      } catch (error) {
+        if (error.name === "AbortError" || (options && options.signal && options.signal.aborted)) {
+          throw error;
+        }
+        if (attempt >= maxAttempts - 1) {
+          throw error;
+        }
+      }
+      const delay = initialDelayMs * Math.pow(backoffFactor, attempt) * (0.8 + Math.random() * 0.4);
+      attempt++;
+      console.log(`[Backoff] Attempt ${attempt} failed, retrying in ${Math.round(delay)}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
   }
 });

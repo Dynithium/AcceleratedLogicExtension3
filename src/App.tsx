@@ -1383,6 +1383,34 @@ const renderFormattedContent = (text: string) => {
   );
 };
 
+// Helper to perform fetch requests with exponential backoff retries for rate limits or server errors
+async function fetchWithBackoff(url: string, options: any, maxAttempts = 3, initialDelayMs = 1000, backoffFactor = 2): Promise<Response> {
+  let attempt = 0;
+  while (true) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok) {
+        return response;
+      }
+      const isRetriable = response.status === 429 || (response.status >= 500 && response.status < 600);
+      if (!isRetriable || attempt >= maxAttempts - 1) {
+        return response;
+      }
+    } catch (error: any) {
+      if (error.name === "AbortError" || (options && options.signal && options.signal.aborted)) {
+        throw error;
+      }
+      if (attempt >= maxAttempts - 1) {
+        throw error;
+      }
+    }
+    const delay = initialDelayMs * Math.pow(backoffFactor, attempt) * (0.8 + Math.random() * 0.4);
+    attempt++;
+    console.log(`[Backoff Simulator] Attempt ${attempt} failed, retrying in ${Math.round(delay)}ms...`);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+}
+
 // Parses thinking blocks out of the text content inside React
 function parseThinkingAndContent(text: string) {
   const thinkingParts: string[] = [];
@@ -1844,7 +1872,7 @@ export default function App() {
             };
           });
 
-          const response = await fetch(url, {
+          const response = await fetchWithBackoff(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             signal: controller.signal,
@@ -1961,7 +1989,8 @@ export default function App() {
             {
               id: turnMsgId,
               role: "assistant",
-              text: ""
+              text: "",
+              toolCalls: []
             }
           ]);
 
@@ -2447,14 +2476,27 @@ export default function App() {
             if (activeFunctionCall.name === "click_element") {
               responseNote = `Element clicked successfully!`;
             } else if (activeFunctionCall.name === "click_at_coordinate") {
-              responseNote = `Clicked coordinate (${activeFunctionCall.args?.x}, ${activeFunctionCall.args?.y})!`;
+              responseNote = `Clicked coordinate (${activeFunctionCall.args?.x || 0}, ${activeFunctionCall.args?.y || 0})!`;
             } else if (activeFunctionCall.name === "type_text") {
               responseNote = `Typed text: "${activeFunctionCall.args?.text || ""}"`;
             }
-            const textWithTool = accumulatedText + `\n\n⚙️ *Called tool: ${activeFunctionCall.name}()*\n⚙️ *Response:* ${responseNote}`;
-            setSimMessages((prev) =>
+
+            const newToolCall = {
+              id: Date.now() + Math.random(),
+              name: activeFunctionCall.name,
+              args: activeFunctionCall.args,
+              response: responseNote
+            };
+
+            setSimMessages((prev: any[]) =>
               prev.map((msg) =>
-                msg.id === turnMsgId ? { ...msg, text: textWithTool } : msg
+                msg.id === turnMsgId 
+                  ? { 
+                      ...msg, 
+                      text: accumulatedText, 
+                      toolCalls: [...(msg.toolCalls || []), newToolCall] 
+                    } 
+                  : msg
               )
             );
 
@@ -3234,6 +3276,39 @@ To install this tool directly into your Chrome browser, check out the **Installa
                                   </details>
                                 </div>
                               )}
+
+                              {/* Beautiful Collapsible Tool Executions block on top like thinking */}
+                              {msg.toolCalls && msg.toolCalls.length > 0 && (
+                                <div className="border border-dashed border-purple-500/25 rounded-lg bg-slate-900/50 overflow-hidden text-left">
+                                  <details className="group" open={true}>
+                                    <summary className="flex items-center justify-between px-2 py-1 bg-purple-500/5 text-purple-300 font-medium text-[9px] cursor-pointer hover:bg-purple-500/10 outline-none select-none">
+                                      <span className="flex items-center gap-1">
+                                        <span className="inline-block">🛠️</span>
+                                        <span>Tool Executions ({msg.toolCalls.length})</span>
+                                      </span>
+                                      <span className="text-[7px] text-slate-500 group-open:rotate-180 transition-transform">▼</span>
+                                    </summary>
+                                    <div className="p-1.5 border-t border-purple-500/10 space-y-2 max-h-[150px] overflow-y-auto">
+                                      {msg.toolCalls.map((tc: any, tcIdx: number) => (
+                                        <div key={tc.id || tcIdx} className="space-y-1 text-[8.5px] border-b border-slate-800 pb-1.5 last:border-0 last:pb-0">
+                                          <div className="flex items-center justify-between font-mono text-slate-300">
+                                            <span className="font-semibold text-purple-400">{tc.name}()</span>
+                                            {tc.args && Object.keys(tc.args).length > 0 && (
+                                              <span className="text-slate-500 text-[8px] truncate max-w-[120px]">
+                                                {JSON.stringify(tc.args)}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="bg-slate-950/80 p-1 rounded font-mono text-slate-400 whitespace-pre-wrap leading-normal border border-slate-800/40">
+                                            {tc.response}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </details>
+                                </div>
+                              )}
+
                               {parsed.content ? (
                                 <div className="text-left">{renderFormattedContent(parsed.content)}</div>
                               ) : (

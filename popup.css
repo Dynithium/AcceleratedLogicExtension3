@@ -689,6 +689,117 @@ body {
   50% { opacity: 1; }
 }
 
+/* Collapsible Tools Block Styling */
+.tools-block {
+  margin-top: 6px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background-color: rgba(30, 41, 59, 0.4);
+  border: 1px dashed rgba(168, 85, 247, 0.25);
+  overflow: hidden;
+}
+
+.tools-toggle-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background-color: rgba(168, 85, 247, 0.06);
+  border: none;
+  cursor: pointer;
+  color: #c084fc;
+  font-size: 0.725rem;
+  font-weight: 500;
+  text-align: left;
+  outline: none;
+}
+
+.tools-toggle-btn:hover {
+  background-color: rgba(168, 85, 247, 0.12);
+}
+
+.tools-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tools-icon {
+  font-size: 0.8rem;
+}
+
+.tools-arrow {
+  transition: transform 0.2s ease;
+  font-size: 0.65rem;
+  color: #64748b;
+}
+
+.tools-block.expanded .tools-arrow {
+  transform: rotate(180deg);
+}
+
+.tools-content {
+  padding: 8px 12px;
+  border-top: 1px solid rgba(168, 85, 247, 0.12);
+  max-height: 150px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tools-block.collapsed .tools-content {
+  display: none;
+}
+
+/* Tool Log Items style */
+.tool-item-log {
+  border-bottom: 1px solid rgba(168, 85, 247, 0.08);
+  padding-bottom: 6px;
+}
+
+.tool-item-log:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.tool-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.tool-item-name {
+  color: #a855f7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+}
+
+.tool-item-status-spinner {
+  font-size: 0.65rem;
+  color: #f59e0b;
+  animation: pulse-slow 1.5s infinite;
+}
+
+.tool-item-status-success {
+  font-size: 0.65rem;
+  color: #22c55e;
+  font-weight: bold;
+}
+
+.tool-item-response {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  padding: 4px 6px;
+  background-color: rgba(15, 23, 42, 0.6);
+  border-radius: 4px;
+  margin-top: 4px;
+  border: 1px solid rgba(168, 85, 247, 0.05);
+  white-space: pre-wrap;
+}
+
 /* Markdown & LaTeX Styling inside Chat Bubbles */
 .bubble-answer p {
   margin-bottom: 8px;
