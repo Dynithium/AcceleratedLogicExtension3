@@ -1852,7 +1852,7 @@ export default function App() {
               contents: optimizedHistory,
               systemInstruction: {
                 parts: [{
-                  text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, and 'type_text' to fill out input fields.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
+                  text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, and 'type_text' to fill out input fields.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
                 }]
               },
               tools: [{
@@ -1886,14 +1886,45 @@ export default function App() {
                     }
                   },
                   {
+                    name: "click_at_coordinate",
+                    description: "Clicks at a specific coordinate (pixel or percentage) on the active tab's screen to select elements, focus rich-text areas, or click canvas-based elements, and optionally types text.",
+                    parameters: {
+                      type: "OBJECT",
+                      properties: {
+                        x: {
+                          type: "NUMBER",
+                          description: "X-coordinate (e.g. 50 for 50% width, or 640 for pixel coordinate)."
+                        },
+                        y: {
+                          type: "NUMBER",
+                          description: "Y-coordinate (e.g. 30 for 30% height, or 480 for pixel coordinate)."
+                        },
+                        coordinateType: {
+                          type: "STRING",
+                          description: "Specify whether coordinates are in 'percentage' (0 to 100) or 'pixels'. Defaults to 'percentage'.",
+                          enum: ["percentage", "pixels"]
+                        },
+                        typeText: {
+                          type: "STRING",
+                          description: "Optional text to type immediately after clicking (focuses and simulates entering text into rich-text, contenteditable, or standard inputs)."
+                        },
+                        submitAfter: {
+                          type: "BOOLEAN",
+                          description: "Whether to submit or hit Enter after typing."
+                        }
+                      },
+                      required: ["x", "y"]
+                    }
+                  },
+                  {
                     name: "type_text",
-                    description: "Types text into an input or textarea on the webpage of the active browser tab.",
+                    description: "Types text into an input, textarea, contenteditable div or rich-text editor on the webpage of the active browser tab.",
                     parameters: {
                       type: "OBJECT",
                       properties: {
                         selector: {
                           type: "STRING",
-                          description: "CSS selector of the input/textarea to type into (e.g. 'input[type=\"text\"]', '#search-input', '.prompt-text')."
+                          description: "CSS selector of the input/textarea/editor to type into (e.g. 'input[type=\"text\"]', '#search-input', '.ql-editor', '.ProseMirror')."
                         },
                         text: {
                           type: "STRING",
@@ -2093,29 +2124,203 @@ export default function App() {
                   message: `[Simulator Fallback] Element matching '${sel || txt}' clicked successfully in virtual space.`
                 };
               }
+            } else if (activeFunctionCall.name === "click_at_coordinate") {
+              const x = activeFunctionCall.args?.x || 0;
+              const y = activeFunctionCall.args?.y || 0;
+              const coordType = activeFunctionCall.args?.coordinateType || "percentage";
+              const typeText = activeFunctionCall.args?.typeText || "";
+              const submitAfter = !!activeFunctionCall.args?.submitAfter;
+
+              const viewport = document.getElementById("simulated-webpage-viewport") || document.body;
+              let clientX = 0, clientY = 0;
+              const rect = viewport.getBoundingClientRect();
+              if (coordType === "percentage") {
+                clientX = rect.left + (x / 100) * rect.width;
+                clientY = rect.top + (y / 100) * rect.height;
+              } else {
+                clientX = rect.left + x;
+                clientY = rect.top + y;
+              }
+
+              // Visual indicator in mockup
+              const dot = document.createElement("div");
+              dot.style.position = "fixed";
+              dot.style.left = `${clientX - 12}px`;
+              dot.style.top = `${clientY - 12}px`;
+              dot.style.width = "24px";
+              dot.style.height = "24px";
+              dot.style.borderRadius = "50%";
+              dot.style.backgroundColor = "rgba(139, 92, 246, 0.4)";
+              dot.style.border = "2px solid #a78bfa";
+              dot.style.boxShadow = "0 0 12px #8b5cf6";
+              dot.style.pointerEvents = "none";
+              dot.style.zIndex = "99999";
+              dot.style.transition = "all 0.6s cubic-bezier(0.16, 1, 0.3, 1)";
+              dot.style.transform = "scale(0.5)";
+              dot.style.opacity = "0";
+              document.body.appendChild(dot);
+
+              requestAnimationFrame(() => {
+                dot.style.transform = "scale(1.5)";
+                dot.style.opacity = "1";
+                setTimeout(() => {
+                  dot.style.transform = "scale(2.5)";
+                  dot.style.opacity = "0";
+                  setTimeout(() => { dot.remove(); }, 600);
+                }, 400);
+              });
+
+              const target = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+              if (target) {
+                try {
+                  target.focus();
+                  target.click();
+                  target.dispatchEvent(new MouseEvent('mousedown', { clientX, clientY, bubbles: true }));
+                  target.dispatchEvent(new MouseEvent('mouseup', { clientX, clientY, bubbles: true }));
+
+                  let hasTyped = false;
+                  if (typeText) {
+                    if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
+                      (target as HTMLInputElement).value = typeText;
+                      target.dispatchEvent(new Event('input', { bubbles: true }));
+                      target.dispatchEvent(new Event('change', { bubbles: true }));
+                      hasTyped = true;
+                    } else {
+                      const targetEditable = target.isContentEditable ? target : (
+                        target.querySelector('[contenteditable="true"]') ||
+                        target.querySelector('.ql-editor') ||
+                        target.querySelector('.public-DraftEditor-content') ||
+                        target.querySelector('.ProseMirror') ||
+                        target.querySelector('[role="textbox"]')
+                      ) as HTMLElement | null;
+
+                      if (targetEditable) {
+                        targetEditable.focus();
+                        try {
+                          const selection = window.getSelection();
+                          if (selection) {
+                            const range = document.createRange();
+                            range.selectNodeContents(targetEditable);
+                            range.collapse(false);
+                            selection.removeAllRanges();
+                            selection.addRange(range);
+                          }
+                          document.execCommand('insertText', false, typeText);
+                        } catch (err) {
+                          targetEditable.innerText = typeText;
+                        }
+                        targetEditable.dispatchEvent(new Event('input', { bubbles: true }));
+                        targetEditable.dispatchEvent(new Event('change', { bubbles: true }));
+                        hasTyped = true;
+                      } else {
+                        try {
+                          document.execCommand('insertText', false, typeText);
+                          hasTyped = true;
+                        } catch (err) {
+                          target.innerText = typeText;
+                          hasTyped = true;
+                        }
+                      }
+                    }
+
+                    if (hasTyped && submitAfter) {
+                      const form = (target as any).form || (target.closest ? target.closest('form') : null);
+                      if (form) {
+                        if (form.requestSubmit) form.requestSubmit();
+                        else form.submit();
+                      } else {
+                        const activeEl = document.activeElement || target;
+                        activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                      }
+                    }
+                  }
+
+                  toolOutput = {
+                    success: true,
+                    tagName: target.tagName,
+                    id: target.id,
+                    message: `[Simulator] Clicked coordinate (${x}, ${y}) targeting <${target.tagName.toLowerCase()}>${typeText ? ` and typed "${typeText}"` : ""}.`
+                  };
+                } catch (err: any) {
+                  toolOutput = { success: false, error: err.message };
+                }
+              } else {
+                toolOutput = {
+                  success: true,
+                  message: `[Simulator Fallback] Clicked coordinate (${x}, ${y}) in virtual space.`
+                };
+              }
             } else if (activeFunctionCall.name === "type_text") {
               const sel = activeFunctionCall.args?.selector || "";
               const txt = activeFunctionCall.args?.text || "";
+              const submitAfter = !!activeFunctionCall.args?.submitAfter;
               let target: any = null;
               try {
                 target = document.querySelector(sel);
               } catch (e) {}
 
-              if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+              if (target) {
                 try {
+                  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
                   target.focus();
-                  if (target.isContentEditable) {
-                    target.innerText = txt;
-                  } else {
+
+                  let hasTyped = false;
+                  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
                     target.value = txt;
+                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                    hasTyped = true;
+                  } else {
+                    const targetEditable = target.isContentEditable ? target : (
+                      target.querySelector('[contenteditable="true"]') ||
+                      target.querySelector('.ql-editor') ||
+                      target.querySelector('.public-DraftEditor-content') ||
+                      target.querySelector('.ProseMirror') ||
+                      target.querySelector('[role="textbox"]')
+                    );
+
+                    if (targetEditable) {
+                      targetEditable.focus();
+                      try {
+                        const selection = window.getSelection();
+                        if (selection) {
+                          const range = document.createRange();
+                          range.selectNodeContents(targetEditable);
+                          range.collapse(false);
+                          selection.removeAllRanges();
+                          selection.addRange(range);
+                        }
+                        const success = document.execCommand('insertText', false, txt);
+                        if (!success) {
+                          targetEditable.innerText = txt;
+                        }
+                      } catch (err) {
+                        targetEditable.innerText = txt;
+                      }
+                      targetEditable.dispatchEvent(new Event('input', { bubbles: true }));
+                      targetEditable.dispatchEvent(new Event('change', { bubbles: true }));
+                      hasTyped = true;
+                    } else {
+                      throw new Error(`Element matching selector '${sel}' is not an input, textarea or contenteditable element.`);
+                    }
                   }
-                  target.dispatchEvent(new Event('input', { bubbles: true }));
-                  target.dispatchEvent(new Event('change', { bubbles: true }));
+
+                  if (hasTyped && submitAfter) {
+                    const form = target.form || (target.closest ? target.closest('form') : null);
+                    if (form) {
+                      if (form.requestSubmit) form.requestSubmit();
+                      else form.submit();
+                    } else {
+                      const activeEl = document.activeElement || target;
+                      activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                    }
+                  }
+
                   toolOutput = {
                     success: true,
                     tagName: target.tagName,
                     id: target.id,
-                    message: `[Simulator] Typed "${txt}" into input field on current screen.`
+                    message: `[Simulator] Typed "${txt}" into target element on current screen.`
                   };
                 } catch (err: any) {
                   toolOutput = { success: false, error: err.message };
@@ -2132,6 +2337,8 @@ export default function App() {
             let responseNote = "Context successfully loaded!";
             if (activeFunctionCall.name === "click_element") {
               responseNote = `Element clicked successfully!`;
+            } else if (activeFunctionCall.name === "click_at_coordinate") {
+              responseNote = `Clicked coordinate (${activeFunctionCall.args?.x}, ${activeFunctionCall.args?.y})!`;
             } else if (activeFunctionCall.name === "type_text") {
               responseNote = `Typed text: "${activeFunctionCall.args?.text || ""}"`;
             }
@@ -2611,7 +2818,7 @@ To install this tool directly into your Chrome browser, check out the **Installa
             <div className="flex flex-1 overflow-hidden">
               
               {/* LEFT SIDE: Mock Article Webpage */}
-              <div className="hidden sm:flex sm:flex-col sm:flex-1 bg-slate-950 p-4 overflow-y-auto select-none border-r border-slate-800/80 text-left">
+              <div id="simulated-webpage-viewport" className="hidden sm:flex sm:flex-col sm:flex-1 bg-slate-950 p-4 overflow-y-auto border-r border-slate-800/80 text-left relative">
                 <div className="border-b border-slate-800 pb-3 mb-3">
                   <div className="text-blue-500 font-mono text-[9px] uppercase font-bold tracking-wider">Research Article</div>
                   <h2 className="text-sm font-bold text-white mt-1 leading-snug">
@@ -2658,6 +2865,30 @@ To install this tool directly into your Chrome browser, check out the **Installa
                     <span>📸</span>
                     <span>Simulate Page Capture in Sidebar</span>
                   </button>
+
+                  {/* Rich-Text Editor Sandbox (Simulating Quill / Draft.js / ProseMirror) */}
+                  <div className="mt-4 p-2.5 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[9px] text-violet-400 font-bold uppercase tracking-wide flex items-center gap-1">
+                        📝 Quill Rich-Text Editor Sandbox
+                      </span>
+                      <span className="text-[8px] bg-violet-500/10 text-violet-400 px-1 rounded font-mono">Interactive</span>
+                    </div>
+                    {/* Rich text formatting toolbar mockup */}
+                    <div className="flex gap-1.5 p-1 bg-slate-950 border border-slate-800 rounded text-slate-500 text-[9px] font-mono select-none">
+                      <span className="font-bold hover:text-slate-300 cursor-pointer px-1">B</span>
+                      <span className="italic hover:text-slate-300 cursor-pointer px-1">I</span>
+                      <span className="underline hover:text-slate-300 cursor-pointer px-1">U</span>
+                      <span className="hover:text-slate-300 cursor-pointer px-1">Link</span>
+                      <span className="hover:text-slate-300 cursor-pointer px-1">Quote</span>
+                    </div>
+                    <div 
+                      contentEditable
+                      suppressContentEditableWarning
+                      className="ql-editor ProseMirror min-h-[50px] p-2 bg-slate-950 text-slate-200 text-[10px] rounded border border-slate-800 focus:outline-none focus:border-violet-500/50 leading-relaxed font-sans empty:before:content-['Type_your_rich-text_notes_here...'] empty:before:text-slate-600 empty:before:pointer-events-none"
+                      style={{ outline: 'none' }}
+                    ></div>
+                  </div>
                 </div>
               </div>
 

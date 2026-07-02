@@ -768,14 +768,45 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
               },
               {
+                name: "click_at_coordinate",
+                description: "Clicks at a specific coordinate (pixel or percentage) on the active tab's screen to select elements, focus rich-text areas, or click canvas-based elements, and optionally types text.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {
+                    x: {
+                      type: "NUMBER",
+                      description: "X-coordinate (e.g. 50 for 50% width, or 640 for pixel coordinate)."
+                    },
+                    y: {
+                      type: "NUMBER",
+                      description: "Y-coordinate (e.g. 30 for 30% height, or 480 for pixel coordinate)."
+                    },
+                    coordinateType: {
+                      type: "STRING",
+                      description: "Specify whether coordinates are in 'percentage' (0 to 100) or 'pixels'. Defaults to 'percentage'.",
+                      enum: ["percentage", "pixels"]
+                    },
+                    typeText: {
+                      type: "STRING",
+                      description: "Optional text to type immediately after clicking (focuses and simulates entering text into rich-text, contenteditable, or standard inputs)."
+                    },
+                    submitAfter: {
+                      type: "BOOLEAN",
+                      description: "Whether to submit or hit Enter after typing."
+                    }
+                  },
+                  required: ["x", "y"]
+                }
+              },
+              {
                 name: "type_text",
-                description: "Types text into an input or textarea on the webpage of the active browser tab.",
+                description: "Types text into an input, textarea, contenteditable div or rich-text editor on the webpage of the active browser tab.",
                 parameters: {
                   type: "OBJECT",
                   properties: {
                     selector: {
                       type: "STRING",
-                      description: "CSS selector of the input/textarea to type into (e.g. 'input[type=\"text\"]', '#search-input', '.prompt-text')."
+                      description: "CSS selector of the input/textarea/editor to type into (e.g. 'input[type=\"text\"]', '#search-input', '.ql-editor', '.ProseMirror')."
                     },
                     text: {
                       type: "STRING",
@@ -1107,7 +1138,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Parse Code Blocks: ```lang\ncode\n```
     const codeBlocks = [];
-    escaped = escaped.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+    escaped = escaped.replace(/```(\w*)[^\n\r]*\r?\n([\s\S]*?)```/g, (match, lang, code) => {
       const id = `__CODE_BLOCK_${codeBlocks.length}__`;
       codeBlocks.push({ lang: lang || 'code', code: code });
       return id;
@@ -1176,7 +1207,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <pre class="code-block-content"><code>${cleanCode}</code></pre>
         </div>
       `;
-      escaped = escaped.replace(placeholder, codeHtml);
+      escaped = escaped.replace(placeholder, () => codeHtml);
     });
 
     // Re-insert LaTeX Blocks with serif equations
@@ -1187,14 +1218,14 @@ document.addEventListener("DOMContentLoaded", () => {
           <div class="latex-formula">${renderLatexToHtml(formula)}</div>
         </div>
       `;
-      escaped = escaped.replace(placeholder, mathHtml);
+      escaped = escaped.replace(placeholder, () => mathHtml);
     });
 
     // Re-insert LaTeX Inlines
     latexInlines.forEach((formula, index) => {
       const placeholder = `__LATEX_INLINE_${index}__`;
       const mathHtml = `<span class="latex-inline">${renderLatexToHtml(formula)}</span>`;
-      escaped = escaped.replace(placeholder, mathHtml);
+      escaped = escaped.replace(placeholder, () => mathHtml);
     });
 
     return escaped;
@@ -1434,29 +1465,192 @@ document.addEventListener("DOMContentLoaded", () => {
               message: `[Simulator Fallback] Element matching '${sel || txt}' clicked successfully in virtual browser space.`
             });
           }
+        } else if (name === "click_at_coordinate") {
+          const x = args.x;
+          const y = args.y;
+          const coordType = args.coordinateType || "percentage";
+          const typeText = args.typeText || "";
+          const submitAfter = !!args.submitAfter;
+
+          const viewport = document.getElementById("simulated-webpage-viewport") || document.body;
+          let clientX, clientY;
+          const rect = viewport.getBoundingClientRect();
+          if (coordType === "percentage") {
+            clientX = rect.left + (x / 100) * rect.width;
+            clientY = rect.top + (y / 100) * rect.height;
+          } else {
+            clientX = rect.left + x;
+            clientY = rect.top + y;
+          }
+
+          // Trigger visual indicator
+          const dot = document.createElement("div");
+          dot.style.position = "fixed";
+          dot.style.left = `${clientX - 12}px`;
+          dot.style.top = `${clientY - 12}px`;
+          dot.style.width = "24px";
+          dot.style.height = "24px";
+          dot.style.borderRadius = "50%";
+          dot.style.backgroundColor = "rgba(59, 130, 246, 0.4)";
+          dot.style.border = "2px solid #60a5fa";
+          dot.style.boxShadow = "0 0 12px #3b82f6";
+          dot.style.pointerEvents = "none";
+          dot.style.zIndex = "99999";
+          dot.style.transition = "all 0.6s cubic-bezier(0.16, 1, 0.3, 1)";
+          dot.style.transform = "scale(0.5)";
+          dot.style.opacity = "0";
+          document.body.appendChild(dot);
+          
+          requestAnimationFrame(() => {
+            dot.style.transform = "scale(1.5)";
+            dot.style.opacity = "1";
+            setTimeout(() => {
+              dot.style.transform = "scale(2.5)";
+              dot.style.opacity = "0";
+              setTimeout(() => { dot.remove(); }, 600);
+            }, 400);
+          });
+
+          // Element from point
+          const target = document.elementFromPoint(clientX, clientY);
+          if (target) {
+            try {
+              target.focus();
+              target.click();
+              target.dispatchEvent(new MouseEvent('mousedown', { clientX, clientY, bubbles: true }));
+              target.dispatchEvent(new MouseEvent('mouseup', { clientX, clientY, bubbles: true }));
+
+              let typedMsg = "";
+              if (typeText) {
+                if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
+                  target.value = typeText;
+                  target.dispatchEvent(new Event('input', { bubbles: true }));
+                  target.dispatchEvent(new Event('change', { bubbles: true }));
+                } else {
+                  const targetEditable = target.isContentEditable ? target : (
+                    target.querySelector('[contenteditable="true"]') ||
+                    target.querySelector('.ql-editor') ||
+                    target.querySelector('.public-DraftEditor-content') ||
+                    target.querySelector('.ProseMirror') ||
+                    target.querySelector('[role="textbox"]')
+                  );
+
+                  if (targetEditable) {
+                    targetEditable.focus();
+                    try {
+                      const selection = window.getSelection();
+                      if (selection) {
+                        const range = document.createRange();
+                        range.selectNodeContents(targetEditable);
+                        range.collapse(false);
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                      }
+                      document.execCommand('insertText', false, typeText);
+                    } catch (err) {
+                      targetEditable.innerText = typeText;
+                    }
+                    targetEditable.dispatchEvent(new Event('input', { bubbles: true }));
+                    targetEditable.dispatchEvent(new Event('change', { bubbles: true }));
+                  } else {
+                    // Try to insert text anyway on the target using execCommand
+                    try {
+                      document.execCommand('insertText', false, typeText);
+                    } catch (err) {
+                      target.innerText = typeText;
+                    }
+                  }
+                }
+                typedMsg = ` and typed "${typeText}"`;
+              }
+
+              resolve({
+                success: true,
+                tagName: target.tagName,
+                id: target.id,
+                message: `[Simulator] Clicked coordinate (${x}, ${y}) targeting <${target.tagName.toLowerCase()}>${typedMsg}.`
+              });
+            } catch (err) {
+              resolve({ success: false, error: err.message });
+            }
+          } else {
+            resolve({
+              success: true,
+              message: `[Simulator Fallback] Clicked coordinate (${x}, ${y}) in virtual space.`
+            });
+          }
         } else if (name === "type_text") {
           const sel = args.selector || "";
           const txt = args.text || "";
+          const submitAfter = !!args.submitAfter;
           let target = null;
           try {
             target = document.querySelector(sel);
           } catch (e) {}
 
-          if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+          if (target) {
             try {
+              target.scrollIntoView({ behavior: 'smooth', block: 'center' });
               target.focus();
-              if (target.isContentEditable) {
-                target.innerText = txt;
-              } else {
+
+              let hasTyped = false;
+              if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
                 target.value = txt;
+                target.dispatchEvent(new Event('input', { bubbles: true }));
+                target.dispatchEvent(new Event('change', { bubbles: true }));
+                hasTyped = true;
+              } else {
+                // Find editable content target
+                const targetEditable = target.isContentEditable ? target : (
+                  target.querySelector('[contenteditable="true"]') ||
+                  target.querySelector('.ql-editor') ||
+                  target.querySelector('.public-DraftEditor-content') ||
+                  target.querySelector('.ProseMirror') ||
+                  target.querySelector('[role="textbox"]')
+                );
+
+                if (targetEditable) {
+                  targetEditable.focus();
+                  try {
+                    const selection = window.getSelection();
+                    if (selection) {
+                      const range = document.createRange();
+                      range.selectNodeContents(targetEditable);
+                      range.collapse(false);
+                      selection.removeAllRanges();
+                      selection.addRange(range);
+                    }
+                    const success = document.execCommand('insertText', false, txt);
+                    if (!success) {
+                      targetEditable.innerText = txt;
+                    }
+                  } catch (err) {
+                    targetEditable.innerText = txt;
+                  }
+                  targetEditable.dispatchEvent(new Event('input', { bubbles: true }));
+                  targetEditable.dispatchEvent(new Event('change', { bubbles: true }));
+                  hasTyped = true;
+                } else {
+                  throw new Error(`Element matching selector '${sel}' is not input, textarea or contenteditable.`);
+                }
               }
-              target.dispatchEvent(new Event('input', { bubbles: true }));
-              target.dispatchEvent(new Event('change', { bubbles: true }));
+
+              if (hasTyped && submitAfter) {
+                const form = target.form || (target.closest ? target.closest('form') : null);
+                if (form) {
+                  if (form.requestSubmit) form.requestSubmit();
+                  else form.submit();
+                } else {
+                  const activeEl = document.activeElement || target;
+                  activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                }
+              }
+
               resolve({
                 success: true,
                 tagName: target.tagName,
                 id: target.id,
-                message: `[Simulator] Typed "${txt}" into input field on current screen.`
+                message: `[Simulator] Typed "${txt}" into target element on current screen.`
               });
             } catch (err) {
               resolve({ success: false, error: err.message });
@@ -1584,6 +1778,145 @@ document.addEventListener("DOMContentLoaded", () => {
               resolve({ success: false, error: "Script injection failed or permission denied on this page." });
             }
           });
+        } else if (name === "click_at_coordinate") {
+          const x = args.x;
+          const y = args.y;
+          const coordType = args.coordinateType || "percentage";
+          const typeText = args.typeText || "";
+          const submit = !!args.submitAfter;
+
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            args: [x, y, coordType, typeText, submit],
+            func: (coordX, coordY, coordinateType, textToType, submitAfter) => {
+              let clientX, clientY;
+              if (coordinateType === "percentage") {
+                clientX = (coordX / 100) * window.innerWidth;
+                clientY = (coordY / 100) * window.innerHeight;
+              } else {
+                clientX = coordX;
+                clientY = coordY;
+              }
+
+              // Create visual indicator in active tab
+              const indicator = document.createElement("div");
+              indicator.style.position = "fixed";
+              indicator.style.left = `${clientX - 15}px`;
+              indicator.style.top = `${clientY - 15}px`;
+              indicator.style.width = "30px";
+              indicator.style.height = "30px";
+              indicator.style.borderRadius = "50%";
+              indicator.style.backgroundColor = "rgba(139, 92, 246, 0.4)"; // purple pulse
+              indicator.style.border = "2px solid #a78bfa";
+              indicator.style.boxShadow = "0 0 15px #8b5cf6";
+              indicator.style.pointerEvents = "none";
+              indicator.style.zIndex = "2147483647";
+              indicator.style.transition = "all 0.8s cubic-bezier(0.16, 1, 0.3, 1)";
+              indicator.style.transform = "scale(0.5)";
+              indicator.style.opacity = "0";
+              document.body.appendChild(indicator);
+
+              requestAnimationFrame(() => {
+                indicator.style.transform = "scale(2)";
+                indicator.style.opacity = "1";
+                setTimeout(() => {
+                  indicator.style.transform = "scale(3)";
+                  indicator.style.opacity = "0";
+                  setTimeout(() => { indicator.remove(); }, 800);
+                }, 500);
+              });
+
+              const target = document.elementFromPoint(clientX, clientY);
+              if (!target) {
+                return { success: false, error: `Could not find any element at coordinates (${coordX}, ${coordY})` };
+              }
+
+              try {
+                target.focus();
+                target.click();
+                target.dispatchEvent(new MouseEvent('mousedown', { clientX, clientY, bubbles: true }));
+                target.dispatchEvent(new MouseEvent('mouseup', { clientX, clientY, bubbles: true }));
+
+                let hasTyped = false;
+                if (textToType) {
+                  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
+                    target.value = textToType;
+                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                    hasTyped = true;
+                  } else {
+                    const targetEditable = target.isContentEditable ? target : (
+                      target.querySelector('[contenteditable="true"]') ||
+                      target.querySelector('.ql-editor') ||
+                      target.querySelector('.public-DraftEditor-content') ||
+                      target.querySelector('.ProseMirror') ||
+                      target.querySelector('[role="textbox"]')
+                    );
+
+                    if (targetEditable) {
+                      targetEditable.focus();
+                      try {
+                        const selection = window.getSelection();
+                        if (selection) {
+                          const range = document.createRange();
+                          range.selectNodeContents(targetEditable);
+                          range.collapse(false);
+                          selection.removeAllRanges();
+                          selection.addRange(range);
+                        }
+                        document.execCommand('insertText', false, textToType);
+                      } catch (e) {
+                        targetEditable.innerText = textToType;
+                      }
+                      targetEditable.dispatchEvent(new Event('input', { bubbles: true }));
+                      targetEditable.dispatchEvent(new Event('change', { bubbles: true }));
+                      hasTyped = true;
+                    } else {
+                      // fallback execCommand at current element
+                      try {
+                        document.execCommand('insertText', false, textToType);
+                        hasTyped = true;
+                      } catch (e) {
+                        target.innerText = textToType;
+                        target.dispatchEvent(new Event('input', { bubbles: true }));
+                        hasTyped = true;
+                      }
+                    }
+                  }
+
+                  if (hasTyped && submitAfter) {
+                    const form = target.form || (target.closest ? target.closest('form') : null);
+                    if (form) {
+                      if (form.requestSubmit) form.requestSubmit();
+                      else form.submit();
+                    } else {
+                      const activeEl = document.activeElement || target;
+                      activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                      activeEl.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                      activeEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                    }
+                  }
+                }
+
+                return {
+                  success: true,
+                  tagName: target.tagName,
+                  id: target.id,
+                  textAtCoordinate: (target.textContent || target.value || "").substring(0, 100).trim(),
+                  typed: hasTyped ? textToType : null,
+                  message: `Successfully clicked at coordinate (${coordX}, ${coordY}) targeting <${target.tagName.toLowerCase()}>.`
+                };
+              } catch (e) {
+                return { success: false, error: e.message };
+              }
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve(results[0].result);
+            } else {
+              resolve({ success: false, error: "Script injection failed or permission denied on this page." });
+            }
+          });
         } else if (name === "type_text") {
           const sel = args.selector || "";
           const txt = args.text || "";
@@ -1607,26 +1940,57 @@ document.addEventListener("DOMContentLoaded", () => {
                 target.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 target.focus();
 
+                let hasTyped = false;
                 if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
                   target.value = text;
-                } else if (target.isContentEditable) {
-                  target.innerText = text;
+                  target.dispatchEvent(new Event('input', { bubbles: true }));
+                  target.dispatchEvent(new Event('change', { bubbles: true }));
+                  hasTyped = true;
                 } else {
-                  return { success: false, error: `Element matching selector '${selector}' is not an input, textarea or contenteditable element.` };
+                  const targetEditable = target.isContentEditable ? target : (
+                    target.querySelector('[contenteditable="true"]') ||
+                    target.querySelector('.ql-editor') ||
+                    target.querySelector('.public-DraftEditor-content') ||
+                    target.querySelector('.ProseMirror') ||
+                    target.querySelector('[role="textbox"]')
+                  );
+
+                  if (targetEditable) {
+                    targetEditable.focus();
+                    try {
+                      const selection = window.getSelection();
+                      if (selection) {
+                        const range = document.createRange();
+                        range.selectNodeContents(targetEditable);
+                        range.collapse(false);
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                      }
+                      const success = document.execCommand('insertText', false, text);
+                      if (!success) {
+                        targetEditable.innerText = text;
+                      }
+                    } catch (e) {
+                      targetEditable.innerText = text;
+                    }
+                    targetEditable.dispatchEvent(new Event('input', { bubbles: true }));
+                    targetEditable.dispatchEvent(new Event('change', { bubbles: true }));
+                    hasTyped = true;
+                  } else {
+                    return { success: false, error: `Element matching selector '${selector}' is not an input, textarea, contenteditable, or rich-text editor container.` };
+                  }
                 }
 
-                target.dispatchEvent(new Event('input', { bubbles: true }));
-                target.dispatchEvent(new Event('change', { bubbles: true }));
-
-                if (submitAfter) {
-                  const form = target.form;
+                if (hasTyped && submitAfter) {
+                  const form = target.form || (target.closest ? target.closest('form') : null);
                   if (form) {
                     if (form.requestSubmit) form.requestSubmit();
                     else form.submit();
                   } else {
-                    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-                    target.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-                    target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                    const activeEl = document.activeElement || target;
+                    activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                    activeEl.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                    activeEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
                   }
                 }
 
