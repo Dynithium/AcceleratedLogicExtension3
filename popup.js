@@ -1096,7 +1096,7 @@ document.addEventListener("DOMContentLoaded", () => {
               }
             });
 
-            currentAssistantBubble.appendChild(imgContainer);
+            toolItem.appendChild(imgContainer);
             scrollToBottom();
 
             responseParts.push({

@@ -2481,11 +2481,21 @@ export default function App() {
               responseNote = `Typed text: "${activeFunctionCall.args?.text || ""}"`;
             }
 
+            let screenshotUrl = "";
+            if (activeFunctionCall.name === "get_page_screenshot") {
+              const defaultTab = SIM_MOCK_TABS[0];
+              const tabTitle = simAttachment?.domContext?.title || defaultTab.title;
+              const tabUrl = simAttachment?.domContext?.url || defaultTab.url;
+              const tabText = simAttachment?.domContext?.text || defaultTab.text;
+              screenshotUrl = generateMockScreenshot(tabTitle, tabUrl, tabText);
+            }
+
             const newToolCall = {
               id: Date.now() + Math.random(),
               name: activeFunctionCall.name,
               args: activeFunctionCall.args,
-              response: responseNote
+              response: responseNote,
+              screenshotUrl: screenshotUrl || undefined
             };
 
             setSimMessages((prev: any[]) =>
@@ -3302,6 +3312,25 @@ To install this tool directly into your Chrome browser, check out the **Installa
                                           <div className="bg-slate-950/80 p-1 rounded font-mono text-slate-400 whitespace-pre-wrap leading-normal border border-slate-800/40">
                                             {tc.response}
                                           </div>
+                                          {tc.screenshotUrl && (
+                                            <div className="mt-1">
+                                              <details className="group/ss">
+                                                <summary className="text-[7.5px] text-purple-400/80 hover:text-purple-300 font-mono cursor-pointer select-none outline-none flex items-center gap-1">
+                                                  <span>📷 Captured Viewport</span>
+                                                  <span className="text-[6.5px] group-open/ss:hidden">(Click to Expand)</span>
+                                                  <span className="text-[6.5px] hidden group-open/ss:inline">(Click to Collapse)</span>
+                                                </summary>
+                                                <div className="mt-1 rounded-md overflow-hidden border border-purple-500/10 max-h-[160px] overflow-y-auto bg-slate-950">
+                                                  <img 
+                                                    src={tc.screenshotUrl} 
+                                                    alt="Captured Viewport" 
+                                                    className="w-full object-contain"
+                                                    referrerPolicy="no-referrer"
+                                                  />
+                                                </div>
+                                              </details>
+                                            </div>
+                                          )}
                                         </div>
                                       ))}
                                     </div>
