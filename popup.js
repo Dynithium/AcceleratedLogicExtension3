@@ -1405,7 +1405,138 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Context extraction tool executor
   function executeTool(name, args) {
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
+      const simulateTyping = async (target, text, submit) => {
+        if (!target) return;
+        target.focus();
+
+        for (let i = 0; i < text.length; i++) {
+          const char = text[i];
+          const keyCode = char.charCodeAt(0);
+
+          // Keydown
+          const keydownEvent = new KeyboardEvent('keydown', {
+            key: char,
+            code: `Key${char.toUpperCase()}`,
+            keyCode: keyCode,
+            which: keyCode,
+            bubbles: true,
+            cancelable: true
+          });
+          target.dispatchEvent(keydownEvent);
+
+          // BeforeInput (crucial for rich text editors, Slate, Lexical, Google Docs, etc.)
+          let beforeInputAllowed = true;
+          try {
+            const beforeInputEvent = new InputEvent('beforeinput', {
+              bubbles: true,
+              cancelable: true,
+              inputType: 'insertText',
+              data: char
+            });
+            beforeInputAllowed = target.dispatchEvent(beforeInputEvent);
+          } catch (e) {}
+
+          if (beforeInputAllowed) {
+            if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
+              const start = target.selectionStart || 0;
+              const end = target.selectionEnd || 0;
+              const oldVal = target.value;
+              target.value = oldVal.substring(0, start) + char + oldVal.substring(end);
+              target.selectionStart = target.selectionEnd = start + 1;
+            } else {
+              const targetEditable = target.isContentEditable ? target : (
+                target.querySelector('[contenteditable="true"]') ||
+                target.querySelector('.ql-editor') ||
+                target.querySelector('.public-DraftEditor-content') ||
+                target.querySelector('.ProseMirror') ||
+                target.querySelector('[role="textbox"]')
+              );
+
+              if (targetEditable) {
+                targetEditable.focus();
+                try {
+                  const selection = window.getSelection();
+                  if (selection && selection.rangeCount > 0) {
+                    const range = selection.getRangeAt(0);
+                    range.deleteContents();
+                    const textNode = document.createTextNode(char);
+                    range.insertNode(textNode);
+                    range.setStartAfter(textNode);
+                    range.setEndAfter(textNode);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                  } else {
+                    document.execCommand('insertText', false, char);
+                  }
+                } catch (err) {
+                  try {
+                    document.execCommand('insertText', false, char);
+                  } catch (e2) {
+                    targetEditable.innerText += char;
+                  }
+                }
+              } else {
+                try {
+                  document.execCommand('insertText', false, char);
+                } catch (err) {
+                  target.innerText += char;
+                }
+              }
+            }
+
+            // Input
+            try {
+              const inputEvent = new InputEvent('input', {
+                bubbles: true,
+                inputType: 'insertText',
+                data: char
+              });
+              target.dispatchEvent(inputEvent);
+            } catch (e) {
+              target.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+          }
+
+          // Keypress
+          const keypressEvent = new KeyboardEvent('keypress', {
+            key: char,
+            code: `Key${char.toUpperCase()}`,
+            keyCode: keyCode,
+            which: keyCode,
+            bubbles: true,
+            cancelable: true
+          });
+          target.dispatchEvent(keypressEvent);
+
+          // Keyup
+          const keyupEvent = new KeyboardEvent('keyup', {
+            key: char,
+            code: `Key${char.toUpperCase()}`,
+            keyCode: keyCode,
+            which: keyCode,
+            bubbles: true,
+            cancelable: true
+          });
+          target.dispatchEvent(keyupEvent);
+
+          await new Promise((r) => setTimeout(r, 10));
+        }
+
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+
+        if (submit) {
+          const form = target.form || (target.closest ? target.closest('form') : null);
+          if (form) {
+            if (form.requestSubmit) form.requestSubmit();
+            else form.submit();
+          } else {
+            const activeEl = document.activeElement || target;
+            activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+          }
+        }
+      };
+
       if (typeof chrome === "undefined" || !chrome.tabs) {
         // Outside extension environment fallback
         if (name === "get_page_dom") {
@@ -1522,45 +1653,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
               let typedMsg = "";
               if (typeText) {
-                if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
-                  target.value = typeText;
-                  target.dispatchEvent(new Event('input', { bubbles: true }));
-                  target.dispatchEvent(new Event('change', { bubbles: true }));
-                } else {
-                  const targetEditable = target.isContentEditable ? target : (
-                    target.querySelector('[contenteditable="true"]') ||
-                    target.querySelector('.ql-editor') ||
-                    target.querySelector('.public-DraftEditor-content') ||
-                    target.querySelector('.ProseMirror') ||
-                    target.querySelector('[role="textbox"]')
-                  );
-
-                  if (targetEditable) {
-                    targetEditable.focus();
-                    try {
-                      const selection = window.getSelection();
-                      if (selection) {
-                        const range = document.createRange();
-                        range.selectNodeContents(targetEditable);
-                        range.collapse(false);
-                        selection.removeAllRanges();
-                        selection.addRange(range);
-                      }
-                      document.execCommand('insertText', false, typeText);
-                    } catch (err) {
-                      targetEditable.innerText = typeText;
-                    }
-                    targetEditable.dispatchEvent(new Event('input', { bubbles: true }));
-                    targetEditable.dispatchEvent(new Event('change', { bubbles: true }));
-                  } else {
-                    // Try to insert text anyway on the target using execCommand
-                    try {
-                      document.execCommand('insertText', false, typeText);
-                    } catch (err) {
-                      target.innerText = typeText;
-                    }
-                  }
-                }
+                await simulateTyping(target, typeText, submitAfter);
                 typedMsg = ` and typed "${typeText}"`;
               }
 
@@ -1593,58 +1686,7 @@ document.addEventListener("DOMContentLoaded", () => {
               target.scrollIntoView({ behavior: 'smooth', block: 'center' });
               target.focus();
 
-              let hasTyped = false;
-              if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
-                target.value = txt;
-                target.dispatchEvent(new Event('input', { bubbles: true }));
-                target.dispatchEvent(new Event('change', { bubbles: true }));
-                hasTyped = true;
-              } else {
-                // Find editable content target
-                const targetEditable = target.isContentEditable ? target : (
-                  target.querySelector('[contenteditable="true"]') ||
-                  target.querySelector('.ql-editor') ||
-                  target.querySelector('.public-DraftEditor-content') ||
-                  target.querySelector('.ProseMirror') ||
-                  target.querySelector('[role="textbox"]')
-                );
-
-                if (targetEditable) {
-                  targetEditable.focus();
-                  try {
-                    const selection = window.getSelection();
-                    if (selection) {
-                      const range = document.createRange();
-                      range.selectNodeContents(targetEditable);
-                      range.collapse(false);
-                      selection.removeAllRanges();
-                      selection.addRange(range);
-                    }
-                    const success = document.execCommand('insertText', false, txt);
-                    if (!success) {
-                      targetEditable.innerText = txt;
-                    }
-                  } catch (err) {
-                    targetEditable.innerText = txt;
-                  }
-                  targetEditable.dispatchEvent(new Event('input', { bubbles: true }));
-                  targetEditable.dispatchEvent(new Event('change', { bubbles: true }));
-                  hasTyped = true;
-                } else {
-                  throw new Error(`Element matching selector '${sel}' is not input, textarea or contenteditable.`);
-                }
-              }
-
-              if (hasTyped && submitAfter) {
-                const form = target.form || (target.closest ? target.closest('form') : null);
-                if (form) {
-                  if (form.requestSubmit) form.requestSubmit();
-                  else form.submit();
-                } else {
-                  const activeEl = document.activeElement || target;
-                  activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-                }
-              }
+              await simulateTyping(target, txt, submitAfter);
 
               resolve({
                 success: true,
@@ -1788,7 +1830,7 @@ document.addEventListener("DOMContentLoaded", () => {
           chrome.scripting.executeScript({
             target: { tabId: activeTab.id },
             args: [x, y, coordType, typeText, submit],
-            func: (coordX, coordY, coordinateType, textToType, submitAfter) => {
+            func: async (coordX, coordY, coordinateType, textToType, submitAfter) => {
               let clientX, clientY;
               if (coordinateType === "percentage") {
                 clientX = (coordX / 100) * window.innerWidth;
@@ -1831,6 +1873,133 @@ document.addEventListener("DOMContentLoaded", () => {
                 return { success: false, error: `Could not find any element at coordinates (${coordX}, ${coordY})` };
               }
 
+              const simulateTyping = async (target, text, submit) => {
+                if (!target) return;
+                target.focus();
+
+                for (let i = 0; i < text.length; i++) {
+                  const char = text[i];
+                  const keyCode = char.charCodeAt(0);
+
+                  // Keydown
+                  const keydownEvent = new KeyboardEvent('keydown', {
+                    key: char,
+                    code: `Key${char.toUpperCase()}`,
+                    keyCode: keyCode,
+                    which: keyCode,
+                    bubbles: true,
+                    cancelable: true
+                  });
+                  target.dispatchEvent(keydownEvent);
+
+                  // BeforeInput (crucial for rich text editors, Slate, Lexical, Google Docs, etc.)
+                  let beforeInputAllowed = true;
+                  try {
+                    const beforeInputEvent = new InputEvent('beforeinput', {
+                      bubbles: true,
+                      cancelable: true,
+                      inputType: 'insertText',
+                      data: char
+                    });
+                    beforeInputAllowed = target.dispatchEvent(beforeInputEvent);
+                  } catch (e) {}
+
+                  if (beforeInputAllowed) {
+                    if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
+                      const start = target.selectionStart || 0;
+                      const end = target.selectionEnd || 0;
+                      const oldVal = target.value;
+                      target.value = oldVal.substring(0, start) + char + oldVal.substring(end);
+                      target.selectionStart = target.selectionEnd = start + 1;
+                    } else {
+                      const targetEditable = target.isContentEditable ? target : (
+                        target.querySelector('[contenteditable="true"]') ||
+                        target.querySelector('.ql-editor') ||
+                        target.querySelector('.public-DraftEditor-content') ||
+                        target.querySelector('.ProseMirror') ||
+                        target.querySelector('[role="textbox"]')
+                      );
+
+                      if (targetEditable) {
+                        targetEditable.focus();
+                        try {
+                          const selection = window.getSelection();
+                          if (selection) {
+                            const range = document.createRange();
+                            range.selectNodeContents(targetEditable);
+                            range.collapse(false);
+                            selection.removeAllRanges();
+                            selection.addRange(range);
+                          }
+                          document.execCommand('insertText', false, char);
+                        } catch (err) {
+                          try {
+                            document.execCommand('insertText', false, char);
+                          } catch (e2) {
+                            targetEditable.innerText += char;
+                          }
+                        }
+                      } else {
+                        try {
+                          document.execCommand('insertText', false, char);
+                        } catch (err) {
+                          target.innerText += char;
+                        }
+                      }
+                    }
+
+                    // Input
+                    try {
+                      const inputEvent = new InputEvent('input', {
+                        bubbles: true,
+                        inputType: 'insertText',
+                        data: char
+                      });
+                      target.dispatchEvent(inputEvent);
+                    } catch (e) {
+                      target.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                  }
+
+                  // Keypress
+                  const keypressEvent = new KeyboardEvent('keypress', {
+                    key: char,
+                    code: `Key${char.toUpperCase()}`,
+                    keyCode: keyCode,
+                    which: keyCode,
+                    bubbles: true,
+                    cancelable: true
+                  });
+                  target.dispatchEvent(keypressEvent);
+
+                  // Keyup
+                  const keyupEvent = new KeyboardEvent('keyup', {
+                    key: char,
+                    code: `Key${char.toUpperCase()}`,
+                    keyCode: keyCode,
+                    which: keyCode,
+                    bubbles: true,
+                    cancelable: true
+                  });
+                  target.dispatchEvent(keyupEvent);
+
+                  await new Promise((r) => setTimeout(r, 10));
+                }
+
+                target.dispatchEvent(new Event('change', { bubbles: true }));
+
+                if (submit) {
+                  const form = target.form || (target.closest ? target.closest('form') : null);
+                  if (form) {
+                    if (form.requestSubmit) form.requestSubmit();
+                    else form.submit();
+                  } else {
+                    const activeEl = document.activeElement || target;
+                    activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                  }
+                }
+              };
+
               try {
                 target.focus();
                 target.click();
@@ -1839,63 +2008,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 let hasTyped = false;
                 if (textToType) {
-                  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
-                    target.value = textToType;
-                    target.dispatchEvent(new Event('input', { bubbles: true }));
-                    target.dispatchEvent(new Event('change', { bubbles: true }));
-                    hasTyped = true;
-                  } else {
-                    const targetEditable = target.isContentEditable ? target : (
-                      target.querySelector('[contenteditable="true"]') ||
-                      target.querySelector('.ql-editor') ||
-                      target.querySelector('.public-DraftEditor-content') ||
-                      target.querySelector('.ProseMirror') ||
-                      target.querySelector('[role="textbox"]')
-                    );
-
-                    if (targetEditable) {
-                      targetEditable.focus();
-                      try {
-                        const selection = window.getSelection();
-                        if (selection) {
-                          const range = document.createRange();
-                          range.selectNodeContents(targetEditable);
-                          range.collapse(false);
-                          selection.removeAllRanges();
-                          selection.addRange(range);
-                        }
-                        document.execCommand('insertText', false, textToType);
-                      } catch (e) {
-                        targetEditable.innerText = textToType;
-                      }
-                      targetEditable.dispatchEvent(new Event('input', { bubbles: true }));
-                      targetEditable.dispatchEvent(new Event('change', { bubbles: true }));
-                      hasTyped = true;
-                    } else {
-                      // fallback execCommand at current element
-                      try {
-                        document.execCommand('insertText', false, textToType);
-                        hasTyped = true;
-                      } catch (e) {
-                        target.innerText = textToType;
-                        target.dispatchEvent(new Event('input', { bubbles: true }));
-                        hasTyped = true;
-                      }
-                    }
-                  }
-
-                  if (hasTyped && submitAfter) {
-                    const form = target.form || (target.closest ? target.closest('form') : null);
-                    if (form) {
-                      if (form.requestSubmit) form.requestSubmit();
-                      else form.submit();
-                    } else {
-                      const activeEl = document.activeElement || target;
-                      activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-                      activeEl.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-                      activeEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-                    }
-                  }
+                  await simulateTyping(target, textToType, submitAfter);
+                  hasTyped = true;
                 }
 
                 return {
@@ -1924,7 +2038,7 @@ document.addEventListener("DOMContentLoaded", () => {
           chrome.scripting.executeScript({
             target: { tabId: activeTab.id },
             args: [sel, txt, submit],
-            func: (selector, text, submitAfter) => {
+            func: async (selector, text, submitAfter) => {
               let target;
               try {
                 target = document.querySelector(selector);
@@ -1936,52 +2050,122 @@ document.addEventListener("DOMContentLoaded", () => {
                 return { success: false, error: `Could not find input element matching selector '${selector}'` };
               }
 
-              try {
-                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              const simulateTyping = async (target, text, submit) => {
+                if (!target) return;
                 target.focus();
 
-                let hasTyped = false;
-                if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
-                  target.value = text;
-                  target.dispatchEvent(new Event('input', { bubbles: true }));
-                  target.dispatchEvent(new Event('change', { bubbles: true }));
-                  hasTyped = true;
-                } else {
-                  const targetEditable = target.isContentEditable ? target : (
-                    target.querySelector('[contenteditable="true"]') ||
-                    target.querySelector('.ql-editor') ||
-                    target.querySelector('.public-DraftEditor-content') ||
-                    target.querySelector('.ProseMirror') ||
-                    target.querySelector('[role="textbox"]')
-                  );
+                for (let i = 0; i < text.length; i++) {
+                  const char = text[i];
+                  const keyCode = char.charCodeAt(0);
 
-                  if (targetEditable) {
-                    targetEditable.focus();
-                    try {
-                      const selection = window.getSelection();
-                      if (selection) {
-                        const range = document.createRange();
-                        range.selectNodeContents(targetEditable);
-                        range.collapse(false);
-                        selection.removeAllRanges();
-                        selection.addRange(range);
+                  // Keydown
+                  const keydownEvent = new KeyboardEvent('keydown', {
+                    key: char,
+                    code: `Key${char.toUpperCase()}`,
+                    keyCode: keyCode,
+                    which: keyCode,
+                    bubbles: true,
+                    cancelable: true
+                  });
+                  target.dispatchEvent(keydownEvent);
+
+                  // BeforeInput (crucial for rich text editors, Slate, Lexical, Google Docs, etc.)
+                  let beforeInputAllowed = true;
+                  try {
+                    const beforeInputEvent = new InputEvent('beforeinput', {
+                      bubbles: true,
+                      cancelable: true,
+                      inputType: 'insertText',
+                      data: char
+                    });
+                    beforeInputAllowed = target.dispatchEvent(beforeInputEvent);
+                  } catch (e) {}
+
+                  if (beforeInputAllowed) {
+                    if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
+                      const start = target.selectionStart || 0;
+                      const end = target.selectionEnd || 0;
+                      const oldVal = target.value;
+                      target.value = oldVal.substring(0, start) + char + oldVal.substring(end);
+                      target.selectionStart = target.selectionEnd = start + 1;
+                    } else {
+                      const targetEditable = target.isContentEditable ? target : (
+                        target.querySelector('[contenteditable="true"]') ||
+                        target.querySelector('.ql-editor') ||
+                        target.querySelector('.public-DraftEditor-content') ||
+                        target.querySelector('.ProseMirror') ||
+                        target.querySelector('[role="textbox"]')
+                      );
+
+                      if (targetEditable) {
+                        targetEditable.focus();
+                        try {
+                          const selection = window.getSelection();
+                          if (selection) {
+                            const range = document.createRange();
+                            range.selectNodeContents(targetEditable);
+                            range.collapse(false);
+                            selection.removeAllRanges();
+                            selection.addRange(range);
+                          }
+                          document.execCommand('insertText', false, char);
+                        } catch (err) {
+                          try {
+                            document.execCommand('insertText', false, char);
+                          } catch (e2) {
+                            targetEditable.innerText += char;
+                          }
+                        }
+                      } else {
+                        try {
+                          document.execCommand('insertText', false, char);
+                        } catch (err) {
+                          target.innerText += char;
+                        }
                       }
-                      const success = document.execCommand('insertText', false, text);
-                      if (!success) {
-                        targetEditable.innerText = text;
-                      }
-                    } catch (e) {
-                      targetEditable.innerText = text;
                     }
-                    targetEditable.dispatchEvent(new Event('input', { bubbles: true }));
-                    targetEditable.dispatchEvent(new Event('change', { bubbles: true }));
-                    hasTyped = true;
-                  } else {
-                    return { success: false, error: `Element matching selector '${selector}' is not an input, textarea, contenteditable, or rich-text editor container.` };
+
+                    // Input
+                    try {
+                      const inputEvent = new InputEvent('input', {
+                        bubbles: true,
+                        inputType: 'insertText',
+                        data: char
+                      });
+                      target.dispatchEvent(inputEvent);
+                    } catch (e) {
+                      target.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
                   }
+
+                  // Keypress
+                  const keypressEvent = new KeyboardEvent('keypress', {
+                    key: char,
+                    code: `Key${char.toUpperCase()}`,
+                    keyCode: keyCode,
+                    which: keyCode,
+                    bubbles: true,
+                    cancelable: true
+                  });
+                  target.dispatchEvent(keypressEvent);
+
+                  // Keyup
+                  const keyupEvent = new KeyboardEvent('keyup', {
+                    key: char,
+                    code: `Key${char.toUpperCase()}`,
+                    keyCode: keyCode,
+                    which: keyCode,
+                    bubbles: true,
+                    cancelable: true
+                  });
+                  target.dispatchEvent(keyupEvent);
+
+                  await new Promise((r) => setTimeout(r, 10));
                 }
 
-                if (hasTyped && submitAfter) {
+                target.dispatchEvent(new Event('change', { bubbles: true }));
+
+                if (submit) {
                   const form = target.form || (target.closest ? target.closest('form') : null);
                   if (form) {
                     if (form.requestSubmit) form.requestSubmit();
@@ -1989,10 +2173,15 @@ document.addEventListener("DOMContentLoaded", () => {
                   } else {
                     const activeEl = document.activeElement || target;
                     activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-                    activeEl.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-                    activeEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
                   }
                 }
+              };
+
+              try {
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                target.focus();
+
+                await simulateTyping(target, text, submitAfter);
 
                 return {
                   success: true,
