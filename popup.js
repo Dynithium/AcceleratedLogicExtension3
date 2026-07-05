@@ -662,28 +662,44 @@ document.addEventListener("DOMContentLoaded", () => {
             extractedDom = results[0].result;
           }
 
-          // 4. Capture visible screenshot
-          chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 80 }, (screenshotUrl) => {
-            if (!screenshotUrl) {
-              // If capturing fails due to restricted page (e.g. chrome:// tabs)
-              showToast("Failed to capture screen (restricted tab). Using DOM context only.");
-              screenshotUrl = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=";
-            }
+          const isVision = apiProvider === "gemini" || (apiProvider === "openai-compatible" && !!openaiCapabilities?.vision);
+          if (isVision) {
+            // 4. Capture visible screenshot
+            chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 80 }, (screenshotUrl) => {
+              if (!screenshotUrl) {
+                // If capturing fails due to restricted page (e.g. chrome:// tabs)
+                showToast("Failed to capture screen (restricted tab). Using DOM context only.");
+                screenshotUrl = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=";
+              }
 
+              setAttachment({
+                name: `Capture: ${extractedDom.title}`,
+                size: "Webpage + DOM context",
+                mimeType: "image/jpeg",
+                base64: screenshotUrl,
+                domContext: extractedDom
+              });
+              
+              // Auto-fill prompt if empty
+              if (!promptInput.value.trim()) {
+                promptInput.value = "Explain or analyze this page for me.";
+                promptInput.dispatchEvent(new Event("input"));
+              }
+            });
+          } else {
+            // ONLY DOM, NO SCREENSHOT
             setAttachment({
               name: `Capture: ${extractedDom.title}`,
-              size: "Webpage + DOM context",
-              mimeType: "image/jpeg",
-              base64: screenshotUrl,
+              size: "Webpage DOM Context",
+              mimeType: null,
+              base64: null,
               domContext: extractedDom
             });
-            
-            // Auto-fill prompt if empty
             if (!promptInput.value.trim()) {
               promptInput.value = "Explain or analyze this page for me.";
               promptInput.dispatchEvent(new Event("input"));
             }
-          });
+          }
         });
       }, 250);
     });
@@ -748,9 +764,9 @@ document.addEventListener("DOMContentLoaded", () => {
     attachmentNameElement.textContent = attachmentObj.name;
     attachmentSizeElement.textContent = attachmentObj.size;
     
-    if (attachmentObj.mimeType.startsWith("image/")) {
+    if (attachmentObj.mimeType && attachmentObj.mimeType.startsWith("image/")) {
       attachmentTypeIcon.textContent = "🖼️";
-    } else if (attachmentObj.mimeType.includes("pdf")) {
+    } else if (attachmentObj.mimeType && attachmentObj.mimeType.includes("pdf")) {
       attachmentTypeIcon.textContent = "📕";
     } else {
       attachmentTypeIcon.textContent = "📄";
@@ -908,12 +924,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const assistHeader = document.createElement("div");
     assistHeader.className = "message-header";
-    assistHeader.innerHTML = `<span>Gemini</span><span>${getCurrentTime()}</span>`;
+    assistHeader.innerHTML = `<span>AcceleratedLogic</span><span>${getCurrentTime()}</span>`;
     assistantBubble.appendChild(assistHeader);
 
     const loaderDiv = document.createElement("div");
     loaderDiv.className = "loading-indicator";
-    loaderDiv.innerHTML = '<div class="spinner"></div> <span>Gemini is thinking...</span>';
+    loaderDiv.innerHTML = '<div class="spinner"></div> <span>AcceleratedLogic is thinking...</span>';
     assistantBubble.appendChild(loaderDiv);
 
     chatLog.appendChild(assistantBubble);
@@ -946,6 +962,16 @@ document.addEventListener("DOMContentLoaded", () => {
         let buffer = "";
         let inThinkingBlock = false;
 
+        const isVisionCapable = apiProvider === "gemini" || !!openaiCapabilities?.vision;
+        const systemInstructionText = `You are AcceleratedLogic, an advanced browser assistant Chrome Extension.
+You help users analyze web pages, answer questions, and perform research.
+You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, and 'search_web' to perform search queries.
+
+CRITICAL RULES:
+- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.
+- Never output raw base64 data, gibberish strings, or repeating binary characters.
+${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n" : ""}- Keep explanations conversational, elegant, and markdown-formatted.`;
+
         if (apiProvider === "openai-compatible") {
           let ep = openaiBaseUrl.replace(/\/+$/,'');
           const url = ep.includes('/chat/completions') ? ep : ep + '/chat/completions';
@@ -955,7 +981,7 @@ document.addEventListener("DOMContentLoaded", () => {
           
           formattedMessages.push({
             role: "system",
-            content: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, and 'search_web' to perform search queries.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
+            content: systemInstructionText
           });
 
           chatHistory.forEach((msg, idx) => {
@@ -1012,14 +1038,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 parameters: { type: "object", properties: {} }
               }
             },
-            {
+            ...(isVisionCapable ? [{
               type: "function",
               function: {
                 name: "get_page_screenshot",
                 description: "Captures a visual screenshot of the current visible tab's viewport as base64 JPEG image data.",
                 parameters: { type: "object", properties: {} }
               }
-            },
+            }] : []),
             {
               type: "function",
               function: {
@@ -1239,7 +1265,7 @@ document.addEventListener("DOMContentLoaded", () => {
             contents: cleanContents,
             systemInstruction: {
               parts: [{
-                text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, and 'search_web' to perform search queries.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
+                text: systemInstructionText
               }]
             },
             tools: [{
@@ -1252,14 +1278,14 @@ document.addEventListener("DOMContentLoaded", () => {
                     properties: {}
                   }
                 },
-                {
+                ...(isVisionCapable ? [{
                   name: "get_page_screenshot",
                   description: "Captures a visual screenshot of the current visible tab's viewport as base64 JPEG image data.",
                   parameters: {
                     type: "OBJECT",
                     properties: {}
                   }
-                },
+                }] : []),
                 {
                   name: "click_element",
                   description: "Clicks an element on the webpage of the active browser tab by its CSS selector or text context.",
@@ -3260,7 +3286,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const header = document.createElement("div");
       header.className = "message-header";
-      header.innerHTML = `<span>${msg.role === 'user' ? 'You' : 'Gemini'}</span>`;
+      header.innerHTML = `<span>${msg.role === 'user' ? 'You' : 'AcceleratedLogic'}</span>`;
       bubble.appendChild(header);
 
       // Render parts

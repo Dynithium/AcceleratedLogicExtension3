@@ -1044,7 +1044,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function appendAssistantLoading() {
     const bubble = document.createElement("div");
     bubble.className = "message-bubble assistant";
-    bubble.innerHTML = \`<div class="loading-indicator"><div class="spinner"></div> <span>Gemini is thinking...</span></div>\`;
+    bubble.innerHTML = \`<div class="loading-indicator"><div class="spinner"></div> <span>AcceleratedLogic is thinking...</span></div>\`;
     chatLog.appendChild(bubble);
     return bubble;
   }
@@ -2017,6 +2017,16 @@ export default function App() {
           let buffer = "";
           let inThinkingBlock = false;
 
+          const isVisionCapable = simProvider === "gemini" || !!simOpenaiCapabilities?.vision;
+          const systemInstructionText = `You are AcceleratedLogic, an advanced browser assistant Chrome Extension.
+You help users analyze web pages, answer questions, and perform research.
+You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, and 'search_web' to perform search queries.
+
+CRITICAL RULES:
+- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.
+- Never output raw base64 data, gibberish strings, or repeating binary characters.
+${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n" : ""}- Keep explanations conversational, elegant, and markdown-formatted.`;
+
           if (simProvider === "openai-compatible") {
             let ep = simOpenaiBaseUrl.replace(/\/+$/,'');
             const url = ep.includes('/chat/completions') ? ep : ep + '/chat/completions';
@@ -2025,7 +2035,7 @@ export default function App() {
             const formattedMessages: any[] = [];
             formattedMessages.push({
               role: "system",
-              content: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, and 'search_web' to perform search queries.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
+              content: systemInstructionText
             });
 
             optimizedHistory.forEach((msg: any, idx: number) => {
@@ -2080,14 +2090,14 @@ export default function App() {
                   parameters: { type: "object", properties: {} }
                 }
               },
-              {
+              ...(isVisionCapable ? [{
                 type: "function",
                 function: {
                   name: "get_page_screenshot",
                   description: "Captures a visual screenshot of the current visible tab's viewport as base64 JPEG image data.",
                   parameters: { type: "object", properties: {} }
                 }
-              },
+              }] : []),
               {
                 type: "function",
                 function: {
@@ -2289,7 +2299,7 @@ export default function App() {
                 contents: optimizedHistory,
                 systemInstruction: {
                   parts: [{
-                    text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, and 'search_web' to perform search queries.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
+                    text: systemInstructionText
                   }]
                 },
                 tools: [{
@@ -2299,11 +2309,11 @@ export default function App() {
                       description: "Retrieves the webpage text context, title, and URL of the active browser tab to answer user context questions.",
                       parameters: { type: "OBJECT", properties: {} }
                     },
-                    {
+                    ...(isVisionCapable ? [{
                       name: "get_page_screenshot",
                       description: "Captures a visual screenshot of the current visible tab's viewport as base64 JPEG image data.",
                       parameters: { type: "OBJECT", properties: {} }
-                    },
+                    }] : []),
                     {
                       name: "click_element",
                       description: "Clicks an element on the webpage of the active browser tab by its CSS selector or text context.",
