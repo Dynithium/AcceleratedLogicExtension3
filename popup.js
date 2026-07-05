@@ -11,6 +11,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const customModelGroup = document.getElementById("custom-model-group");
   const inputCustomModel = document.getElementById("input-custom-model");
 
+  // OpenAI-Compatible Elements
+  const selectProvider = document.getElementById("select-provider");
+  const geminiSettingsGroup = document.getElementById("gemini-settings-group");
+  const openaiSettingsGroup = document.getElementById("openai-settings-group");
+  const inputOpenaiBaseUrl = document.getElementById("input-openai-base-url");
+  const inputOpenaiApiKey = document.getElementById("input-openai-api-key");
+  const btnToggleOpenaiKeyVisibility = document.getElementById("btn-toggle-openai-key-visibility");
+  const inputOpenaiModelId = document.getElementById("input-openai-model-id");
+  const btnScanOpenai = document.getElementById("btn-scan-openai");
+  const openaiScanResults = document.getElementById("openai-scan-results");
+
   const chatLog = document.getElementById("chat-log");
   const welcomeScreen = document.getElementById("welcome-screen");
   const welcomeKeyWarning = document.getElementById("welcome-key-warning");
@@ -42,8 +53,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const pickerTabList = document.getElementById("picker-tab-list");
 
   // Extension State
+  let apiProvider = "gemini";
   let apiKey = "";
   let modelId = "gemini-2.5-flash";
+  let openaiBaseUrl = "https://api.openai.com/v1";
+  let openaiApiKey = "";
+  let openaiModelId = "gpt-4o-mini";
+  let openaiCapabilities = { vision: false, audio: false };
+
   let activeAttachment = null; // { name, size, mimeType, base64, domContext }
   let chats = []; // list of { id, title, history }
   let activeChatId = null;
@@ -53,13 +70,50 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 1. Initial Load & Hydrate Settings
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get(["apiKey", "modelId", "customModelId", "chats", "activeChatId", "chatHistory"], (result) => {
-      if (result.apiKey) {
-        apiKey = result.apiKey;
+    chrome.storage.local.get([
+      "apiProvider", "apiKey", "modelId", "customModelId", "chats", "activeChatId", "chatHistory",
+      "openaiBaseUrl", "openaiApiKey", "openaiModelId", "openaiCapabilities"
+    ], (result) => {
+      if (result.apiProvider) {
+        apiProvider = result.apiProvider;
+        selectProvider.value = apiProvider;
+        if (apiProvider === "gemini") {
+          geminiSettingsGroup.style.display = "block";
+          openaiSettingsGroup.style.display = "none";
+        } else {
+          geminiSettingsGroup.style.display = "none";
+          openaiSettingsGroup.style.display = "block";
+        }
+      }
+
+      if (result.openaiBaseUrl) {
+        openaiBaseUrl = result.openaiBaseUrl;
+        inputOpenaiBaseUrl.value = openaiBaseUrl;
+      }
+      if (result.openaiApiKey) {
+        openaiApiKey = result.openaiApiKey;
+        inputOpenaiApiKey.value = openaiApiKey;
+      }
+      if (result.openaiModelId) {
+        openaiModelId = result.openaiModelId;
+        inputOpenaiModelId.value = openaiModelId;
+      }
+      if (result.openaiCapabilities) {
+        openaiCapabilities = result.openaiCapabilities;
+        openaiScanResults.innerHTML = `Capabilities Verified:<br>• Text: Confirmed<br>• Vision: ${openaiCapabilities.vision ? "✅ Confirmed" : "❌ Not supported"}<br>• Audio: ${openaiCapabilities.audio ? "✅ Confirmed" : "❌ Not supported"}`;
+        openaiScanResults.style.color = "#6ee7a8";
+      }
+
+      const activeKey = apiProvider === "gemini" ? result.apiKey : result.openaiApiKey;
+      if (activeKey) {
+        apiKey = result.apiKey || "";
         inputApiKey.value = apiKey;
         welcomeKeyWarning.style.display = "none";
       } else {
+        apiKey = result.apiKey || "";
+        inputApiKey.value = apiKey;
         welcomeKeyWarning.style.display = "block";
+        welcomeKeyWarning.textContent = apiProvider === "gemini" ? "⚠️ Please click the gear icon (⚙️) above to configure your Gemini API Key." : "⚠️ Please click the gear icon (⚙️) above to configure your OpenAI-Compatible API Key.";
       }
 
       if (result.modelId) {
@@ -298,6 +352,28 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // Toggle OpenAI API Key visibility
+  btnToggleOpenaiKeyVisibility.addEventListener("click", () => {
+    if (inputOpenaiApiKey.type === "password") {
+      inputOpenaiApiKey.type = "text";
+      btnToggleOpenaiKeyVisibility.textContent = "Hide";
+    } else {
+      inputOpenaiApiKey.type = "password";
+      btnToggleOpenaiKeyVisibility.textContent = "Show";
+    }
+  });
+
+  // Toggle Settings Groups depending on Provider
+  selectProvider.addEventListener("change", () => {
+    if (selectProvider.value === "gemini") {
+      geminiSettingsGroup.style.display = "block";
+      openaiSettingsGroup.style.display = "none";
+    } else {
+      geminiSettingsGroup.style.display = "none";
+      openaiSettingsGroup.style.display = "block";
+    }
+  });
+
   // Model selection listener
   selectModel.addEventListener("change", () => {
     if (selectModel.value === "custom") {
@@ -307,8 +383,154 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // OpenAI Model scanner
+  const TINY_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
+  function makeSilentWavBase64(durationSec, sampleRate) {
+    const numSamples = Math.floor(durationSec * sampleRate);
+    const dataSize = numSamples * 2; // 16-bit mono
+    const buf = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buf);
+    function writeStr(offset, str) { for(let i=0;i<str.length;i++) view.setUint8(offset+i, str.charCodeAt(i)); }
+    writeStr(0,'RIFF'); view.setUint32(4, 36+dataSize, true); writeStr(8,'WAVE');
+    writeStr(12,'fmt '); view.setUint32(16,16,true); view.setUint16(20,1,true);
+    view.setUint16(22,1,true); view.setUint32(24,sampleRate,true);
+    view.setUint32(28, sampleRate*2, true); view.setUint16(32,2,true); view.setUint16(34,16,true);
+    writeStr(36,'data'); view.setUint32(40,dataSize,true);
+    let binary = '';
+    const bytes = new Uint8Array(buf);
+    for(let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
+  const TINY_WAV_B64 = makeSilentWavBase64(0.2, 8000);
+
+  function heuristicGuess(name) {
+    const n = (name||'').toLowerCase();
+    const visionPattern = /gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-4-vision|o1|o3|o4|gemini|claude-3|claude-4|claude-sonnet|claude-opus|claude-haiku|llava|-vl\b|vision|pixtral|qwen.*vl|internvl|phi-3.*vision|phi-3\.5-vision|llama-3\.2.*vision|llama-4|molmo/;
+    const audioPattern = /gpt-4o-audio|realtime|audio-preview|qwen.*audio|omni/;
+    return { vision: visionPattern.test(n), audio: audioPattern.test(n) };
+  }
+
+  btnScanOpenai.addEventListener("click", async () => {
+    const endpoint = inputOpenaiBaseUrl.value.trim();
+    const key = inputOpenaiApiKey.value.trim();
+    const model = inputOpenaiModelId.value.trim();
+
+    if (!endpoint || !key || !model) {
+      openaiScanResults.textContent = "Error: Please enter Base URL, API Key, and Model ID first.";
+      openaiScanResults.style.color = "#f2665e";
+      return;
+    }
+
+    btnScanOpenai.disabled = true;
+    btnScanOpenai.textContent = "Scanning...";
+    openaiScanResults.textContent = "Scanning connection and capabilities...";
+    openaiScanResults.style.color = "#f2b84b";
+
+    async function rawCall(messages) {
+      let ep = endpoint.replace(/\/+$/,'');
+      const url = ep.includes('/chat/completions') ? ep : ep + '/chat/completions';
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + key
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messages,
+          max_tokens: 5
+        })
+      });
+      let json = null;
+      try { json = await response.json(); } catch(e){}
+      return { ok: response.ok, status: response.status, json };
+    }
+
+    function getErrText(res) {
+      if (res && res.json && res.json.error) {
+        return res.json.error.message || JSON.stringify(res.json.error);
+      }
+      if (res && res.json) return JSON.stringify(res.json).slice(0, 150);
+      return 'Status ' + (res ? res.status : '?');
+    }
+
+    try {
+      // 1. Text check
+      const textRes = await rawCall([{ role: 'user', content: 'Reply with just: OK' }]);
+      if (!textRes.ok) {
+        openaiScanResults.textContent = `Text failed (${textRes.status}): ` + getErrText(textRes);
+        openaiScanResults.style.color = "#f2665e";
+        btnScanOpenai.disabled = false;
+        btnScanOpenai.textContent = "🔍 Scan Model Capabilities";
+        return;
+      }
+
+      let detectedVision = false;
+      let detectedAudio = false;
+      const guess = heuristicGuess(model);
+
+      // 2. Vision probe
+      try {
+        const visRes = await rawCall([
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Reply with just: OK' },
+              { type: 'image_url', image_url: { url: 'data:image/png;base64,' + TINY_PNG_B64 } }
+            ]
+          }
+        ]);
+        if (visRes.ok) {
+          detectedVision = true;
+        } else {
+          const errMsg = getErrText(visRes).toLowerCase();
+          if (!errMsg.includes('image') && !errMsg.includes('vision') && !errMsg.includes('multimodal') && !errMsg.includes('unsupported')) {
+            detectedVision = guess.vision;
+          }
+        }
+      } catch (e) {
+        detectedVision = guess.vision;
+      }
+
+      // 3. Audio probe
+      try {
+        const audRes = await rawCall([
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Reply with just: OK' },
+              { type: 'input_audio', input_audio: { data: TINY_WAV_B64, format: 'wav' } }
+            ]
+          }
+        ]);
+        if (audRes.ok) {
+          detectedAudio = true;
+        } else {
+          const errMsg = getErrText(audRes).toLowerCase();
+          if (!errMsg.includes('audio') && !errMsg.includes('multimodal') && !errMsg.includes('unsupported')) {
+            detectedAudio = guess.audio;
+          }
+        }
+      } catch (e) {
+        detectedAudio = guess.audio;
+      }
+
+      openaiCapabilities = { vision: detectedVision, audio: detectedAudio };
+      openaiScanResults.innerHTML = `Capabilities Verified:<br>• Text: Confirmed<br>• Vision: ${detectedVision ? "✅ Confirmed" : "❌ Not supported"}<br>• Audio: ${detectedAudio ? "✅ Confirmed" : "❌ Not supported"}`;
+      openaiScanResults.style.color = "#6ee7a8";
+    } catch (err) {
+      openaiScanResults.textContent = "Error scanning: " + err.message;
+      openaiScanResults.style.color = "#f2665e";
+    }
+
+    btnScanOpenai.disabled = false;
+    btnScanOpenai.textContent = "🔍 Scan Model Capabilities";
+  });
+
   // Save Settings Clicked
   btnSaveSettings.addEventListener("click", () => {
+    apiProvider = selectProvider.value;
     apiKey = inputApiKey.value.trim();
     let selectedVal = selectModel.value;
     
@@ -318,17 +540,28 @@ document.addEventListener("DOMContentLoaded", () => {
       modelId = selectedVal;
     }
 
+    openaiBaseUrl = inputOpenaiBaseUrl.value.trim() || "https://api.openai.com/v1";
+    openaiApiKey = inputOpenaiApiKey.value.trim();
+    openaiModelId = inputOpenaiModelId.value.trim() || "gpt-4o-mini";
+
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
       chrome.storage.local.set({
+        apiProvider: apiProvider,
         apiKey: apiKey,
         modelId: selectedVal,
-        customModelId: inputCustomModel.value.trim()
+        customModelId: inputCustomModel.value.trim(),
+        openaiBaseUrl: openaiBaseUrl,
+        openaiApiKey: openaiApiKey,
+        openaiModelId: openaiModelId,
+        openaiCapabilities: openaiCapabilities
       }, () => {
         settingsPane.classList.add("collapsed");
-        if (apiKey) {
+        const activeKey = apiProvider === "gemini" ? apiKey : openaiApiKey;
+        if (activeKey) {
           welcomeKeyWarning.style.display = "none";
         } else {
           welcomeKeyWarning.style.display = "block";
+          welcomeKeyWarning.textContent = apiProvider === "gemini" ? "⚠️ Please click the gear icon (⚙️) above to configure your Gemini API Key." : "⚠️ Please click the gear icon (⚙️) above to configure your OpenAI-Compatible API Key.";
         }
         showToast("Settings saved successfully!");
       });
@@ -576,8 +809,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const prompt = promptInput.value.trim();
     if (!prompt && !activeAttachment) return;
 
-    if (!apiKey) {
-      showToast("Please enter your Gemini API Key in Settings first!");
+    const activeKey = apiProvider === "gemini" ? apiKey : openaiApiKey;
+    if (!activeKey) {
+      showToast(apiProvider === "gemini" ? "Please enter your Gemini API Key in Settings first!" : "Please enter your OpenAI-Compatible API Key in Settings first!");
       settingsPane.classList.remove("collapsed");
       return;
     }
@@ -704,239 +938,559 @@ document.addEventListener("DOMContentLoaded", () => {
         hasMoreTurns = false;
         let activeFunctionCall = null;
 
-        // Call Gemini API directly with streamGenerateContent and tools enabled
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:streamGenerateContent?key=${apiKey}`;
-        
-        // Optimize chat history: strip massive base64 inlineData from all past turns to prevent token bloat and extreme latency
-        const cleanContents = chatHistory.map((msg, index) => {
-          const isPastTurn = index < chatHistory.length - 1;
-          const cleanParts = msg.parts.map(part => {
-            if (part.inlineData) {
-              if (isPastTurn) {
-                return { text: `[Attachment (${part.inlineData.mimeType}) analyzed in previous turn]` };
-              }
-            }
-            return part;
-          });
-          return {
-            role: msg.role,
-            parts: cleanParts
-          };
-        });
-
-        const payload = {
-          contents: cleanContents,
-          systemInstruction: {
-            parts: [{
-              text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, and 'type_text' to fill out input fields.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
-            }]
-          },
-          tools: [{
-            functionDeclarations: [
-              {
-                name: "get_page_dom",
-                description: "Retrieves the webpage text context, title, and URL of the active browser tab to answer user context questions.",
-                parameters: {
-                  type: "OBJECT",
-                  properties: {}
-                }
-              },
-              {
-                name: "get_page_screenshot",
-                description: "Captures a visual screenshot of the current visible tab's viewport as base64 JPEG image data.",
-                parameters: {
-                  type: "OBJECT",
-                  properties: {}
-                }
-              },
-              {
-                name: "click_element",
-                description: "Clicks an element on the webpage of the active browser tab by its CSS selector or text context.",
-                parameters: {
-                  type: "OBJECT",
-                  properties: {
-                    selector: {
-                      type: "STRING",
-                      description: "CSS selector of the element to click (e.g. 'button', '#submit', '.btn-login', 'a')."
-                    },
-                    textContext: {
-                      type: "STRING",
-                      description: "Optional case-insensitive text inside the element to click (e.g. 'Submit', 'Log In', 'Sign Up')."
-                    }
-                  },
-                  required: ["selector"]
-                }
-              },
-              {
-                name: "click_at_coordinate",
-                description: "Clicks at a specific coordinate (pixel or percentage) on the active tab's screen to select elements, focus rich-text areas, or click canvas-based elements, and optionally types text.",
-                parameters: {
-                  type: "OBJECT",
-                  properties: {
-                    x: {
-                      type: "NUMBER",
-                      description: "X-coordinate (e.g. 50 for 50% width, or 640 for pixel coordinate)."
-                    },
-                    y: {
-                      type: "NUMBER",
-                      description: "Y-coordinate (e.g. 30 for 30% height, or 480 for pixel coordinate)."
-                    },
-                    coordinateType: {
-                      type: "STRING",
-                      description: "Specify whether coordinates are in 'percentage' (0 to 100) or 'pixels'. Defaults to 'percentage'.",
-                      enum: ["percentage", "pixels"]
-                    },
-                    typeText: {
-                      type: "STRING",
-                      description: "Optional text to type immediately after clicking (focuses and simulates entering text into rich-text, contenteditable, or standard inputs)."
-                    },
-                    submitAfter: {
-                      type: "BOOLEAN",
-                      description: "Whether to submit or hit Enter after typing."
-                    }
-                  },
-                  required: ["x", "y"]
-                }
-              },
-              {
-                name: "type_text",
-                description: "Types text into an input, textarea, contenteditable div or rich-text editor on the webpage of the active browser tab.",
-                parameters: {
-                  type: "OBJECT",
-                  properties: {
-                    selector: {
-                      type: "STRING",
-                      description: "CSS selector of the input/textarea/editor to type into (e.g. 'input[type=\"text\"]', '#search-input', '.ql-editor', '.ProseMirror')."
-                    },
-                    text: {
-                      type: "STRING",
-                      description: "The text string to type into the element."
-                    },
-                    submitAfter: {
-                      type: "BOOLEAN",
-                      description: "Whether to submit or hit Enter after typing."
-                    }
-                  },
-                  required: ["selector", "text"]
-                }
-              }
-            ]
-          }]
-        };
-
-        const response = await fetchWithBackoff(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          signal: currentAbortController.signal,
-          body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-          const errJson = await response.json();
-          throw new Error(errJson.error?.message || `API Error: ${response.status}`);
-        }
-
-        if (!response.body) {
-          throw new Error("ReadableStream not supported on this browser.");
-        }
-
-        const reader = response.body.getReader();
+        let response;
+        let reader;
         const decoder = new TextDecoder("utf-8");
         let accumulatedText = "";
         let rawModelParts = [];
         let buffer = "";
         let inThinkingBlock = false;
 
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
+        if (apiProvider === "openai-compatible") {
+          let ep = openaiBaseUrl.replace(/\/+$/,'');
+          const url = ep.includes('/chat/completions') ? ep : ep + '/chat/completions';
+          
+          // Map chatHistory to OpenAI format
+          const formattedMessages = [];
+          
+          formattedMessages.push({
+            role: "system",
+            content: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, and 'search_web' to perform search queries.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
+          });
 
-          const chunk = decoder.decode(value, { stream: true });
-          buffer += chunk;
-
-          let b = 0;
-          while (b < buffer.length) {
-            const startIdx = buffer.indexOf('{', b);
-            if (startIdx === -1) {
-              break;
-            }
-
-            let bracketCount = 0;
-            let endIdx = -1;
-            let inString = false;
-            let escape = false;
-
-            for (let i = startIdx; i < buffer.length; i++) {
-              const char = buffer[i];
-              if (escape) {
-                escape = false;
-                continue;
+          chatHistory.forEach((msg, idx) => {
+            const isPastTurn = idx < chatHistory.length - 1;
+            const role = msg.role === 'model' ? 'assistant' : 'user';
+            
+            let textContent = "";
+            let base64Images = [];
+            
+            msg.parts.forEach(part => {
+              if (part.text) {
+                textContent += part.text;
+              } else if (part.inlineData) {
+                if (!isPastTurn && openaiCapabilities.vision) {
+                  base64Images.push(part.inlineData);
+                } else if (isPastTurn) {
+                  textContent += ` [Attachment (${part.inlineData.mimeType}) analyzed in previous turn] `;
+                }
               }
-              if (char === '\\') {
-                escape = true;
-                continue;
+              if (part.functionCall) {
+                textContent += `\n[Requested tool execution: ${part.functionCall.name} with arguments: ${JSON.stringify(part.functionCall.args)}]`;
               }
-              if (char === '"') {
-                inString = !inString;
-                continue;
-              }
-              if (!inString) {
-                if (char === '{') {
-                  bracketCount++;
-                } else if (char === '}') {
-                  bracketCount--;
-                  if (bracketCount === 0) {
-                    endIdx = i;
-                    break;
+            });
+
+            if (base64Images.length > 0) {
+              const contentArray = [{ type: "text", text: textContent || "Analyze this page screenshot." }];
+              base64Images.forEach(img => {
+                contentArray.push({
+                  type: "image_url",
+                  image_url: {
+                    url: `data:${img.mimeType};base64,${img.data}`
                   }
+                });
+              });
+              formattedMessages.push({
+                role: role,
+                content: contentArray
+              });
+            } else {
+              formattedMessages.push({
+                role: role,
+                content: textContent || "Analyze"
+              });
+            }
+          });
+
+          // Declare OpenAI tools
+          const openAITools = [
+            {
+              type: "function",
+              function: {
+                name: "get_page_dom",
+                description: "Retrieves the webpage text context, title, and URL of the active browser tab to answer user context questions.",
+                parameters: { type: "object", properties: {} }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "get_page_screenshot",
+                description: "Captures a visual screenshot of the current visible tab's viewport as base64 JPEG image data.",
+                parameters: { type: "object", properties: {} }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "click_element",
+                description: "Clicks an element on the webpage of the active browser tab by its CSS selector or text context.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    selector: {
+                      type: "string",
+                      description: "CSS selector of the element to click (e.g. 'button', '#submit', '.btn-login', 'a')."
+                    },
+                    textContext: {
+                      type: "string",
+                      description: "Optional case-insensitive text inside the element to click (e.g. 'Submit', 'Log In', 'Sign Up')."
+                    }
+                  },
+                  required: ["selector"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "click_at_coordinate",
+                description: "Clicks at a specific coordinate (pixel or percentage) on the active tab's screen to select elements, focus rich-text areas, or click canvas-based elements, and optionally types text.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    x: { type: "number", description: "X-coordinate (0 to 100 for percentage, or pixel coordinate)." },
+                    y: { type: "number", description: "Y-coordinate (0 to 100 for percentage, or pixel coordinate)." },
+                    coordinateType: { type: "string", enum: ["percentage", "pixels"], description: "Defaults to 'percentage'." },
+                    typeText: { type: "string", description: "Optional text to type immediately after clicking." },
+                    submitAfter: { type: "boolean", description: "Whether to submit or hit Enter after typing." }
+                  },
+                  required: ["x", "y"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "type_text",
+                description: "Types text into an input, textarea, contenteditable div or rich-text editor on the webpage of the active browser tab.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    selector: { type: "string", description: "CSS selector of the input/textarea/editor to type into." },
+                    text: { type: "string", description: "The text string to type into the element." },
+                    submitAfter: { type: "boolean", description: "Whether to submit or hit Enter after typing." }
+                  },
+                  required: ["selector", "text"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "scroll_page",
+                description: "Scrolls the webpage in a given direction by a specified pixel amount or percentage.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    direction: { type: "string", enum: ["up", "down", "left", "right"], description: "The direction to scroll." },
+                    amount: { type: "number", description: "Optional pixel amount to scroll." }
+                  },
+                  required: ["direction"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "open_tab",
+                description: "Opens a new browser tab with the specified URL.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    url: { type: "string", description: "The complete URL to open." }
+                  },
+                  required: ["url"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "search_web",
+                description: "Performs a web search for the specified query and navigates to the search results.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    query: { type: "string", description: "The search query string." }
+                  },
+                  required: ["query"]
                 }
               }
             }
+          ];
 
-            if (endIdx !== -1) {
-              const jsonStr = buffer.substring(startIdx, endIdx + 1);
+          response = await fetchWithBackoff(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer " + openaiApiKey
+            },
+            signal: currentAbortController.signal,
+            body: JSON.stringify({
+              model: openaiModelId,
+              messages: formattedMessages,
+              stream: true,
+              tools: openAITools
+            })
+          });
+
+          if (!response.ok) {
+            const errJson = await response.json();
+            throw new Error(errJson.error?.message || `API Error: ${response.status}`);
+          }
+
+          if (!response.body) {
+            throw new Error("ReadableStream not supported on this browser.");
+          }
+
+          reader = response.body.getReader();
+          let openaiToolCalls = [];
+
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+
+            const lines = buffer.split("\n");
+            buffer = lines.pop();
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith("data:")) continue;
+              const data = trimmed.slice(5).trim();
+              if (data === "[DONE]") continue;
+
               try {
-                const obj = JSON.parse(jsonStr);
-                const parts = obj.candidates?.[0]?.content?.parts;
-                if (parts) {
-                  rawModelParts.push(...parts);
-                  for (const part of parts) {
-                    if (part.text) {
-                      const isThought = !!part.thought;
-                      if (isThought && !inThinkingBlock) {
-                        accumulatedText += "<thinking>" + part.text;
-                        inThinkingBlock = true;
-                      } else if (!isThought && inThinkingBlock) {
-                        accumulatedText += "</thinking>" + part.text;
-                        inThinkingBlock = false;
-                      } else {
-                        accumulatedText += part.text;
-                      }
+                const parsed = JSON.parse(data);
+                const choice = parsed.choices?.[0];
+                if (choice) {
+                  const delta = choice.delta;
+                  if (delta) {
+                    if (delta.content) {
+                      accumulatedText += delta.content;
                       updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
                       scrollToBottom();
                     }
-                    if (part.functionCall) {
-                      activeFunctionCall = part.functionCall;
+                    if (delta.tool_calls) {
+                      delta.tool_calls.forEach(tc => {
+                        const idx = tc.index ?? 0;
+                        if (!openaiToolCalls[idx]) {
+                          openaiToolCalls[idx] = { id: "", name: "", arguments: "" };
+                        }
+                        if (tc.id) openaiToolCalls[idx].id = tc.id;
+                        if (tc.function) {
+                          if (tc.function.name) openaiToolCalls[idx].name += tc.function.name;
+                          if (tc.function.arguments) openaiToolCalls[idx].arguments += tc.function.arguments;
+                        }
+                      });
                     }
                   }
                 }
-              } catch (e) {
-                console.warn("Could not parse JSON object in stream:", e);
-              }
-              b = endIdx + 1;
-            } else {
-              break;
+              } catch (e) {}
             }
           }
-          buffer = buffer.substring(b);
-        }
 
-        if (inThinkingBlock) {
-          accumulatedText += "</thinking>";
-          inThinkingBlock = false;
-          updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
+          if (openaiToolCalls.length > 0) {
+            const firstCall = openaiToolCalls[0];
+            let parsedArgs = {};
+            try { parsedArgs = JSON.parse(firstCall.arguments); } catch(e) {}
+            activeFunctionCall = {
+              name: firstCall.name,
+              args: parsedArgs
+            };
+            rawModelParts = [
+              { text: accumulatedText || "Executing browser tools..." },
+              {
+                functionCall: {
+                  name: firstCall.name,
+                  args: parsedArgs
+                }
+              }
+            ];
+          } else {
+            rawModelParts = [{ text: accumulatedText }];
+          }
+
+        } else {
+          // Call Gemini API directly with streamGenerateContent and tools enabled
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:streamGenerateContent?key=${apiKey}`;
+          
+          // Optimize chat history: strip massive base64 inlineData from all past turns to prevent token bloat and extreme latency
+          const cleanContents = chatHistory.map((msg, index) => {
+            const isPastTurn = index < chatHistory.length - 1;
+            const cleanParts = msg.parts.map(part => {
+              if (part.inlineData) {
+                if (isPastTurn) {
+                  return { text: `[Attachment (${part.inlineData.mimeType}) analyzed in previous turn]` };
+                }
+              }
+              return part;
+            });
+            return {
+              role: msg.role,
+              parts: cleanParts
+            };
+          });
+
+          const payload = {
+            contents: cleanContents,
+            systemInstruction: {
+              parts: [{
+                text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, and 'search_web' to perform search queries.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
+              }]
+            },
+            tools: [{
+              functionDeclarations: [
+                {
+                  name: "get_page_dom",
+                  description: "Retrieves the webpage text context, title, and URL of the active browser tab to answer user context questions.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {}
+                  }
+                },
+                {
+                  name: "get_page_screenshot",
+                  description: "Captures a visual screenshot of the current visible tab's viewport as base64 JPEG image data.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {}
+                  }
+                },
+                {
+                  name: "click_element",
+                  description: "Clicks an element on the webpage of the active browser tab by its CSS selector or text context.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      selector: {
+                        type: "STRING",
+                        description: "CSS selector of the element to click (e.g. 'button', '#submit', '.btn-login', 'a')."
+                      },
+                      textContext: {
+                        type: "STRING",
+                        description: "Optional case-insensitive text inside the element to click (e.g. 'Submit', 'Log In', 'Sign Up')."
+                      }
+                    },
+                    required: ["selector"]
+                  }
+                },
+                {
+                  name: "click_at_coordinate",
+                  description: "Clicks at a specific coordinate (pixel or percentage) on the active tab's screen to select elements, focus rich-text areas, or click canvas-based elements, and optionally types text.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      x: {
+                        type: "NUMBER",
+                        description: "X-coordinate (e.g. 50 for 50% width, or 640 for pixel coordinate)."
+                      },
+                      y: {
+                        type: "NUMBER",
+                        description: "Y-coordinate (e.g. 30 for 30% height, or 480 for pixel coordinate)."
+                      },
+                      coordinateType: {
+                        type: "STRING",
+                        description: "Specify whether coordinates are in 'percentage' (0 to 100) or 'pixels'. Defaults to 'percentage'.",
+                        enum: ["percentage", "pixels"]
+                      },
+                      typeText: {
+                        type: "STRING",
+                        description: "Optional text to type immediately after clicking (focuses and simulates entering text into rich-text, contenteditable, or standard inputs)."
+                      },
+                      submitAfter: {
+                        type: "BOOLEAN",
+                        description: "Whether to submit or hit Enter after typing."
+                      }
+                    },
+                    required: ["x", "y"]
+                  }
+                },
+                {
+                  name: "type_text",
+                  description: "Types text into an input, textarea, contenteditable div or rich-text editor on the webpage of the active browser tab.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      selector: {
+                        type: "STRING",
+                        description: "CSS selector of the input/textarea/editor to type into (e.g. 'input[type=\"text\"]', '#search-input', '.ql-editor', '.ProseMirror')."
+                      },
+                      text: {
+                        type: "STRING",
+                        description: "The text string to type into the element."
+                      },
+                      submitAfter: {
+                        type: "BOOLEAN",
+                        description: "Whether to submit or hit Enter after typing."
+                      }
+                    },
+                    required: ["selector", "text"]
+                  }
+                },
+                {
+                  name: "scroll_page",
+                  description: "Scrolls the webpage in a given direction by a specified pixel amount or percentage.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      direction: {
+                        type: "STRING",
+                        description: "The direction to scroll.",
+                        enum: ["up", "down", "left", "right"]
+                      },
+                      amount: {
+                        type: "NUMBER",
+                        description: "Optional pixel amount to scroll. If omitted, defaults to 75% of the viewport height/width."
+                      }
+                    },
+                    required: ["direction"]
+                  }
+                },
+                {
+                  name: "open_tab",
+                  description: "Opens a new browser tab with the specified URL.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      url: {
+                        type: "STRING",
+                        description: "The complete URL to open (e.g., 'https://www.google.com')."
+                      }
+                    },
+                    required: ["url"]
+                  }
+                },
+                {
+                  name: "search_web",
+                  description: "Performs a web search for the specified query and navigates to the search results.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      query: {
+                        type: "STRING",
+                        description: "The search query string."
+                      }
+                    },
+                    required: ["query"]
+                  }
+                }
+              ]
+            }]
+          };
+
+          response = await fetchWithBackoff(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            signal: currentAbortController.signal,
+            body: JSON.stringify(payload)
+          });
+
+          if (!response.ok) {
+            const errJson = await response.json();
+            throw new Error(errJson.error?.message || `API Error: ${response.status}`);
+          }
+
+          if (!response.body) {
+            throw new Error("ReadableStream not supported on this browser.");
+          }
+
+          reader = response.body.getReader();
+
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+
+            let b = 0;
+            while (b < buffer.length) {
+              const startIdx = buffer.indexOf('{', b);
+              if (startIdx === -1) {
+                break;
+              }
+
+              let bracketCount = 0;
+              let endIdx = -1;
+              let inString = false;
+              let escape = false;
+
+              for (let i = startIdx; i < buffer.length; i++) {
+                const char = buffer[i];
+                if (escape) {
+                  escape = false;
+                  continue;
+                }
+                if (char === '\\') {
+                  escape = true;
+                  continue;
+                }
+                if (char === '"') {
+                  inString = !inString;
+                  continue;
+                }
+                if (!inString) {
+                  if (char === '{') {
+                    bracketCount++;
+                  } else if (char === '}') {
+                    bracketCount--;
+                    if (bracketCount === 0) {
+                      endIdx = i;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              if (endIdx !== -1) {
+                const jsonStr = buffer.substring(startIdx, endIdx + 1);
+                try {
+                  const obj = JSON.parse(jsonStr);
+                  const parts = obj.candidates?.[0]?.content?.parts;
+                  if (parts) {
+                    rawModelParts.push(...parts);
+                    for (const part of parts) {
+                      if (part.text) {
+                        const isThought = !!part.thought;
+                        if (isThought && !inThinkingBlock) {
+                          accumulatedText += "<thinking>" + part.text;
+                          inThinkingBlock = true;
+                        } else if (!isThought && inThinkingBlock) {
+                          accumulatedText += "</thinking>" + part.text;
+                          inThinkingBlock = false;
+                        } else {
+                          accumulatedText += part.text;
+                        }
+                        updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
+                        scrollToBottom();
+                      }
+                      if (part.functionCall) {
+                        activeFunctionCall = part.functionCall;
+                      }
+                    }
+                  }
+                } catch (e) {
+                  console.warn("Could not parse JSON object in stream:", e);
+                }
+                b = endIdx + 1;
+              } else {
+                break;
+              }
+            }
+            buffer = buffer.substring(b);
+          }
+
+          if (inThinkingBlock) {
+            accumulatedText += "</thinking>";
+            inThinkingBlock = false;
+            updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
+          }
         }
 
         if (activeFunctionCall) {
@@ -1842,6 +2396,41 @@ document.addEventListener("DOMContentLoaded", () => {
               message: `[Simulator Fallback] Typed "${txt}" into virtual input field matching '${sel}'.`
             });
           }
+        } else if (name === "scroll_page") {
+          const dir = args.direction || "down";
+          const amt = args.amount || 500;
+          const viewport = document.getElementById("simulated-webpage-viewport") || window;
+          let scrollX = 0;
+          let scrollY = 0;
+          if (dir === "down") scrollY = amt;
+          else if (dir === "up") scrollY = -amt;
+          else if (dir === "right") scrollX = amt;
+          else if (dir === "left") scrollX = -amt;
+
+          if (viewport.scrollBy) {
+            viewport.scrollBy({ left: scrollX, top: scrollY, behavior: "smooth" });
+          } else {
+            viewport.scrollLeft += scrollX;
+            viewport.scrollTop += scrollY;
+          }
+          resolve({
+            success: true,
+            message: `[Simulator] Scrolled page ${dir} by ${amt} pixels.`
+          });
+        } else if (name === "open_tab") {
+          const url = args.url;
+          resolve({
+            success: true,
+            url: url,
+            message: `[Simulator] Successfully opened a new tab in background: ${url}`
+          });
+        } else if (name === "search_web") {
+          const query = args.query;
+          resolve({
+            success: true,
+            query: query,
+            message: `[Simulator] Searched the web for "${query}". Displaying top search results.`
+          });
         } else {
           resolve({ error: "Unknown tool" });
         }
@@ -2492,6 +3081,54 @@ document.addEventListener("DOMContentLoaded", () => {
             } else {
               resolve({ success: false, error: "Script injection failed or permission denied on this page." });
             }
+          });
+        } else if (name === "scroll_page") {
+          const dir = args.direction || "down";
+          const amt = args.amount;
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            args: [dir, amt],
+            func: (direction, amount) => {
+              const scrollAmt = amount || (window.innerHeight * 0.75);
+              let scrollX = 0;
+              let scrollY = 0;
+              if (direction === "down") scrollY = scrollAmt;
+              else if (direction === "up") scrollY = -scrollAmt;
+              else if (direction === "right") scrollX = scrollAmt;
+              else if (direction === "left") scrollX = -scrollAmt;
+              window.scrollBy({ left: scrollX, top: scrollY, behavior: 'smooth' });
+              return {
+                success: true,
+                message: `Successfully scrolled ${direction} by ${scrollAmt}px.`
+              };
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve(results[0].result);
+            } else {
+              resolve({ success: false, error: "Script injection failed for scrolling." });
+            }
+          });
+        } else if (name === "open_tab") {
+          const url = args.url;
+          chrome.tabs.create({ url: url }, (tab) => {
+            resolve({
+              success: true,
+              tabId: tab.id,
+              url: tab.url,
+              message: `Successfully opened new tab with URL: ${url}`
+            });
+          });
+        } else if (name === "search_web") {
+          const query = args.query;
+          const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+          chrome.tabs.create({ url: searchUrl }, (tab) => {
+            resolve({
+              success: true,
+              tabId: tab.id,
+              query: query,
+              message: `Successfully performed web search for "${query}" and opened search tab.`
+            });
           });
         } else {
           resolve({ error: "Unknown tool" });

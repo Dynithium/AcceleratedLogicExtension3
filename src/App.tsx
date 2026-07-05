@@ -1568,20 +1568,64 @@ function generateMockScreenshot(title: string, url: string, text: string): strin
   return canvas.toDataURL("image/jpeg", 0.85);
 }
 
+const DEFAULT_SIM_MOCK_TABS = [
+  {
+    id: 1,
+    title: "Gemini Extension Builder",
+    url: "https://gemini-extension-builder.ai.studio",
+    icon: "🛠️",
+    screenshot: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80",
+    text: "Gemini Extension Builder is an advanced workbench to package custom Manifest V3 extensions. The app facilitates in-browser compilation of manifest.json, popup.html, popup.css, and popup.js into a packed ZIP folder. Built on June 2026, it uses React, Tailwind v4 and local JSZip compiler."
+  },
+  {
+    id: 2,
+    title: "Google Search - Gemini API Documentation",
+    url: "https://www.google.com/search?q=gemini+api+documentation",
+    icon: "🔍",
+    screenshot: "https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&w=400&q=80",
+    text: "Search Results for Gemini API:\n1. Gemini API Overview - Google AI for Developers.\n2. GitHub - google-gemini/nanofsu: TypeScript SDK for the Gemini API.\n3. Build Extensions using the Gemini API - Manifest V3 Developer Guide."
+  },
+  {
+    id: 3,
+    title: "Gemini API Documentation & Guides",
+    url: "https://ai.google.dev/gemini-api/docs",
+    icon: "📕",
+    screenshot: "https://images.unsplash.com/photo-1542831371-29b0f74f9713?auto=format&fit=crop&w=400&q=80",
+    text: "Welcome to the Gemini API developer guides. Learn how to construct multi-modal content prompts, run streaming chats, enable code execution tools, and use advanced thinking models with think levels. Let's build stateful or stateless browser integrations today!"
+  },
+  {
+    id: 4,
+    title: "TechCrunch - AI Innovations in 2026",
+    url: "https://techcrunch.com/2026/06/gemini-unveils-new-thinking-features",
+    icon: "📰",
+    screenshot: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=400&q=80",
+    text: "TechCrunch: Google Gemini introduces highly transparent 'thinking' blocks for client-side side panel extensions. The new SDK provides structured 'thought' blocks within JSON stream chunks, yielding massive reasoning speedups and giving developers deep observability into multi-step agent actions."
+  }
+];
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<"simulator" | "install" | "explorer">("simulator");
   const [activeFile, setActiveFile] = useState<string>("manifest.json");
   const [copied, setCopied] = useState<boolean>(false);
 
   // Simulator States
+  const [simProvider, setSimProvider] = useState<"gemini" | "openai-compatible">("gemini");
   const [simApiKey, setSimApiKey] = useState<string>("");
   const [simModel, setSimModel] = useState<string>("gemini-2.5-flash");
   const [simCustomModel, setSimCustomModel] = useState<string>("gemini-3.5-flash");
+  const [simOpenaiBaseUrl, setSimOpenaiBaseUrl] = useState<string>("https://api.openai.com/v1");
+  const [simOpenaiApiKey, setSimOpenaiApiKey] = useState<string>("");
+  const [simOpenaiModelId, setSimOpenaiModelId] = useState<string>("gpt-4o-mini");
+  const [simOpenaiCapabilities, setSimOpenaiCapabilities] = useState<any>({ vision: false, audio: false });
+  const [simScanningOpenai, setSimScanningOpenai] = useState<boolean>(false);
+  const [simScanResults, setSimScanResults] = useState<string>("");
   const [simInput, setSimInput] = useState<string>("");
   const [simSettingsOpen, setSimSettingsOpen] = useState<boolean>(false);
   const [simShowKey, setSimShowKey] = useState<boolean>(false);
   const [simAttachment, setSimAttachment] = useState<any>(null);
   const [simPlusMenuOpen, setSimPlusMenuOpen] = useState<boolean>(false);
+  const [simTabs, setSimTabs] = useState<Array<any>>(() => DEFAULT_SIM_MOCK_TABS);
+  const [activeSimTabId, setActiveSimTabId] = useState<number>(1);
   
   // Multiple Chats in Simulator
   const [simChats, setSimChats] = useState<Array<any>>(() => {
@@ -1612,9 +1656,10 @@ export default function App() {
   const [simChatsOpen, setSimChatsOpen] = useState<boolean>(false);
   const [simTabPickerOpen, setSimTabPickerOpen] = useState<boolean>(false);
 
-  // Derive simMessages based on active chat
+  // Derive simMessages and activeSimTab
   const activeSimChat = simChats.find(c => c.id === simActiveChatId) || simChats[0];
   const simMessages = activeSimChat ? activeSimChat.messages : [];
+  const activeSimTab = simTabs.find(t => t.id === activeSimTabId) || simTabs[0] || DEFAULT_SIM_MOCK_TABS[0];
 
   // Custom setSimMessages interceptor to update active chat
   const setSimMessages = (updater: any) => {
@@ -1704,44 +1749,12 @@ export default function App() {
     setSimTabPickerOpen(true);
   };
 
-  const SIM_MOCK_TABS = [
-    {
-      id: 1,
-      title: "Gemini Extension Builder",
-      url: "https://gemini-extension-builder.ai.studio",
-      icon: "🛠️",
-      screenshot: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80",
-      text: "Gemini Extension Builder is an advanced workbench to package custom Manifest V3 extensions. The app facilitates in-browser compilation of manifest.json, popup.html, popup.css, and popup.js into a packed ZIP folder. Built on June 2026, it uses React, Tailwind v4 and local JSZip compiler."
-    },
-    {
-      id: 2,
-      title: "Google Search - Gemini API Documentation",
-      url: "https://www.google.com/search?q=gemini+api+documentation",
-      icon: "🔍",
-      screenshot: "https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&w=400&q=80",
-      text: "Search Results for Gemini API:\n1. Gemini API Overview - Google AI for Developers.\n2. GitHub - google-gemini/nanofsu: TypeScript SDK for the Gemini API.\n3. Build Extensions using the Gemini API - Manifest V3 Developer Guide."
-    },
-    {
-      id: 3,
-      title: "Gemini API Documentation & Guides",
-      url: "https://ai.google.dev/gemini-api/docs",
-      icon: "📕",
-      screenshot: "https://images.unsplash.com/photo-1542831371-29b0f74f9713?auto=format&fit=crop&w=400&q=80",
-      text: "Welcome to the Gemini API developer guides. Learn how to construct multi-modal content prompts, run streaming chats, enable code execution tools, and use advanced thinking models with think levels. Let's build stateful or stateless browser integrations today!"
-    },
-    {
-      id: 4,
-      title: "TechCrunch - AI Innovations in 2026",
-      url: "https://techcrunch.com/2026/06/gemini-unveils-new-thinking-features",
-      icon: "📰",
-      screenshot: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=400&q=80",
-      text: "TechCrunch: Google Gemini introduces highly transparent 'thinking' blocks for client-side side panel extensions. The new SDK provides structured 'thought' blocks within JSON stream chunks, yielding massive reasoning speedups and giving developers deep observability into multi-step agent actions."
-    }
-  ];
+  const SIM_MOCK_TABS = simTabs;
 
-  const handleSelectSimTab = (tab: typeof SIM_MOCK_TABS[0]) => {
+  const handleSelectSimTab = (tab: any) => {
     setSimTabPickerOpen(false);
     setSimLoading(true);
+    setActiveSimTabId(tab.id);
     
     setTimeout(() => {
       setSimAttachment({
@@ -1773,6 +1786,121 @@ export default function App() {
     setSimLoading(false);
   };
 
+  const handleSimScanOpenai = async () => {
+    const endpoint = simOpenaiBaseUrl.trim();
+    const key = simOpenaiApiKey.trim();
+    const model = simOpenaiModelId.trim();
+
+    if (!endpoint || !key || !model) {
+      setSimScanResults("Error: Please enter Base URL, API Key, and Model ID first.");
+      return;
+    }
+
+    setSimScanningOpenai(true);
+    setSimScanResults("Scanning connection and capabilities...");
+
+    const TINY_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const TINY_WAV_B64 = "UklGRiYAAABXQVZFRm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQgAAAAAAAAA";
+
+    async function rawCall(messages: any) {
+      let ep = endpoint.replace(/\/+$/,'');
+      const url = ep.includes('/chat/completions') ? ep : ep + '/chat/completions';
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + key
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messages,
+          max_tokens: 5
+        })
+      });
+      let json = null;
+      try { json = await response.json(); } catch(e){}
+      return { ok: response.ok, status: response.status, json };
+    }
+
+    function getErrText(res: any) {
+      if (res && res.json && res.json.error) {
+        return res.json.error.message || JSON.stringify(res.json.error);
+      }
+      if (res && res.json) return JSON.stringify(res.json).slice(0, 150);
+      return 'Status ' + (res ? res.status : '?');
+    }
+
+    try {
+      // 1. Text check
+      const textRes = await rawCall([{ role: 'user', content: 'Reply with just: OK' }]);
+      if (!textRes.ok) {
+        setSimScanResults(`Text failed (${textRes.status}): ` + getErrText(textRes));
+        setSimScanningOpenai(false);
+        return;
+      }
+
+      let detectedVision = false;
+      let detectedAudio = false;
+      
+      const n = model.toLowerCase();
+      const visionPattern = /gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-4-vision|o1|o3|o4|gemini|claude-3|claude-4|claude-sonnet|claude-opus|claude-haiku|llava|-vl\b|vision|pixtral|qwen.*vl|internvl|phi-3.*vision|phi-3\.5-vision|llama-3\.2.*vision|llama-4|molmo/;
+      const audioPattern = /gpt-4o-audio|realtime|audio-preview|qwen.*audio|omni/;
+      const guess = { vision: visionPattern.test(n), audio: audioPattern.test(n) };
+
+      // 2. Vision probe
+      try {
+        const visRes = await rawCall([
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Reply with just: OK' },
+              { type: 'image_url', image_url: { url: 'data:image/png;base64,' + TINY_PNG_B64 } }
+            ]
+          }
+        ]);
+        if (visRes.ok) {
+          detectedVision = true;
+        } else {
+          const errMsg = getErrText(visRes).toLowerCase();
+          if (!errMsg.includes('image') && !errMsg.includes('vision') && !errMsg.includes('multimodal') && !errMsg.includes('unsupported')) {
+            detectedVision = guess.vision;
+          }
+        }
+      } catch (e) {
+        detectedVision = guess.vision;
+      }
+
+      // 3. Audio probe
+      try {
+        const audRes = await rawCall([
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Reply with just: OK' },
+              { type: 'input_audio', input_audio: { data: TINY_WAV_B64, format: 'wav' } }
+            ]
+          }
+        ]);
+        if (audRes.ok) {
+          detectedAudio = true;
+        } else {
+          const errMsg = getErrText(audRes).toLowerCase();
+          if (!errMsg.includes('audio') && !errMsg.includes('multimodal') && !errMsg.includes('unsupported')) {
+            detectedAudio = guess.audio;
+          }
+        }
+      } catch (e) {
+        detectedAudio = guess.audio;
+      }
+
+      setSimOpenaiCapabilities({ vision: detectedVision, audio: detectedAudio });
+      setSimScanResults(`Capabilities Verified:\n• Text: Confirmed\n• Vision: ${detectedVision ? "✅ Confirmed" : "❌ Not supported"}\n• Audio: ${detectedAudio ? "✅ Confirmed" : "❌ Not supported"}`);
+    } catch (err: any) {
+      setSimScanResults("Error scanning: " + err.message);
+    }
+    setSimScanningOpenai(false);
+  };
+
   // Send message in simulator
   const handleSimSend = async () => {
     if (!simInput.trim() && !simAttachment) return;
@@ -1793,8 +1921,9 @@ export default function App() {
     setSimAttachment(null);
 
     const activeModelId = simModel === "custom" ? simCustomModel : simModel;
+    const canSend = simProvider === "openai-compatible" ? !!simOpenaiApiKey : !!simApiKey;
 
-    if (simApiKey) {
+    if (canSend) {
       setSimLoading(true);
       setSimGenerating(true);
       
@@ -1802,8 +1931,6 @@ export default function App() {
       simAbortControllerRef.current = controller;
 
       try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModelId}:streamGenerateContent?key=${simApiKey}`;
-        
         // Prepare whole history
         const chatHistoryForApi = updatedMessages.slice(0, -1).map(msg => {
           if (msg.role === "user") {
@@ -1872,117 +1999,6 @@ export default function App() {
             };
           });
 
-          const response = await fetchWithBackoff(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            signal: controller.signal,
-            body: JSON.stringify({
-              contents: optimizedHistory,
-              systemInstruction: {
-                parts: [{
-                  text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, and 'type_text' to fill out input fields.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
-                }]
-              },
-              tools: [{
-                functionDeclarations: [
-                  {
-                    name: "get_page_dom",
-                    description: "Retrieves the webpage text context, title, and URL of the active browser tab to answer user context questions.",
-                    parameters: { type: "OBJECT", properties: {} }
-                  },
-                  {
-                    name: "get_page_screenshot",
-                    description: "Captures a visual screenshot of the current visible tab's viewport as base64 JPEG image data.",
-                    parameters: { type: "OBJECT", properties: {} }
-                  },
-                  {
-                    name: "click_element",
-                    description: "Clicks an element on the webpage of the active browser tab by its CSS selector or text context.",
-                    parameters: {
-                      type: "OBJECT",
-                      properties: {
-                        selector: {
-                          type: "STRING",
-                          description: "CSS selector of the element to click (e.g. 'button', '#submit', '.btn-login', 'a')."
-                        },
-                        textContext: {
-                          type: "STRING",
-                          description: "Optional case-insensitive text inside the element to click (e.g. 'Submit', 'Log In', 'Sign Up')."
-                        }
-                      },
-                      required: ["selector"]
-                    }
-                  },
-                  {
-                    name: "click_at_coordinate",
-                    description: "Clicks at a specific coordinate (pixel or percentage) on the active tab's screen to select elements, focus rich-text areas, or click canvas-based elements, and optionally types text.",
-                    parameters: {
-                      type: "OBJECT",
-                      properties: {
-                        x: {
-                          type: "NUMBER",
-                          description: "X-coordinate (e.g. 50 for 50% width, or 640 for pixel coordinate)."
-                        },
-                        y: {
-                          type: "NUMBER",
-                          description: "Y-coordinate (e.g. 30 for 30% height, or 480 for pixel coordinate)."
-                        },
-                        coordinateType: {
-                          type: "STRING",
-                          description: "Specify whether coordinates are in 'percentage' (0 to 100) or 'pixels'. Defaults to 'percentage'.",
-                          enum: ["percentage", "pixels"]
-                        },
-                        typeText: {
-                          type: "STRING",
-                          description: "Optional text to type immediately after clicking (focuses and simulates entering text into rich-text, contenteditable, or standard inputs)."
-                        },
-                        submitAfter: {
-                          type: "BOOLEAN",
-                          description: "Whether to submit or hit Enter after typing."
-                        }
-                      },
-                      required: ["x", "y"]
-                    }
-                  },
-                  {
-                    name: "type_text",
-                    description: "Types text into an input, textarea, contenteditable div or rich-text editor on the webpage of the active browser tab.",
-                    parameters: {
-                      type: "OBJECT",
-                      properties: {
-                        selector: {
-                          type: "STRING",
-                          description: "CSS selector of the input/textarea/editor to type into (e.g. 'input[type=\"text\"]', '#search-input', '.ql-editor', '.ProseMirror')."
-                        },
-                        text: {
-                          type: "STRING",
-                          description: "The text string to type into the element."
-                        },
-                        submitAfter: {
-                          type: "BOOLEAN",
-                          description: "Whether to submit or hit Enter after typing."
-                        }
-                      },
-                      required: ["selector", "text"]
-                    }
-                  }
-                ]
-              }]
-            })
-          });
-
-          if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.error?.message || `HTTP ${response.status}`);
-          }
-
-          if (!response.body) {
-            throw new Error("ReadableStream not supported on this browser.");
-          }
-
-          setSimLoading(false);
-
-          // Add a new assistant message bubble for this turn
           const turnMsgId = Date.now() + Math.random();
           setSimMessages((prev) => [
             ...prev,
@@ -1994,93 +2010,517 @@ export default function App() {
             }
           ]);
 
-          const reader = response.body.getReader();
+          let response: Response;
           const decoder = new TextDecoder("utf-8");
           let accumulatedText = "";
           let rawModelParts: any[] = [];
           let buffer = "";
           let inThinkingBlock = false;
 
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
+          if (simProvider === "openai-compatible") {
+            let ep = simOpenaiBaseUrl.replace(/\/+$/,'');
+            const url = ep.includes('/chat/completions') ? ep : ep + '/chat/completions';
+            
+            // Format for OpenAI
+            const formattedMessages: any[] = [];
+            formattedMessages.push({
+              role: "system",
+              content: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, and 'search_web' to perform search queries.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
+            });
 
-            const chunk = decoder.decode(value, { stream: true });
-            buffer += chunk;
+            optimizedHistory.forEach((msg: any, idx: number) => {
+              const isPastTurn = idx < optimizedHistory.length - 1;
+              const role = msg.role === 'model' ? 'assistant' : 'user';
+              let textContent = "";
+              let base64Images: any[] = [];
 
-            let b = 0;
-            while (b < buffer.length) {
-              const startIdx = buffer.indexOf('{', b);
-              if (startIdx === -1) break;
+              msg.parts.forEach((part: any) => {
+                if (part.text) {
+                  textContent += part.text;
+                } else if (part.inlineData) {
+                  if (!isPastTurn && simOpenaiCapabilities.vision) {
+                    base64Images.push(part.inlineData);
+                  } else if (isPastTurn) {
+                    textContent += ` [Attachment (${part.inlineData.mimeType}) analyzed in previous turn] `;
+                  }
+                }
+                if (part.functionCall) {
+                  textContent += `\n[Requested tool execution: ${part.functionCall.name} with arguments: ${JSON.stringify(part.functionCall.args)}]`;
+                }
+              });
 
-              let bracketCount = 0;
-              let endIdx = -1;
-              let inString = false;
-              let escape = false;
+              if (base64Images.length > 0) {
+                const contentArray: any[] = [{ type: "text", text: textContent || "Analyze this page screenshot." }];
+                base64Images.forEach(img => {
+                  contentArray.push({
+                    type: "image_url",
+                    image_url: {
+                      url: `data:${img.mimeType};base64,${img.data}`
+                    }
+                  });
+                });
+                formattedMessages.push({
+                  role: role,
+                  content: contentArray
+                });
+              } else {
+                formattedMessages.push({
+                  role: role,
+                  content: textContent || "Analyze"
+                });
+              }
+            });
 
-              for (let i = startIdx; i < buffer.length; i++) {
-                const char = buffer[i];
-                if (escape) { escape = false; continue; }
-                if (char === '\\') { escape = true; continue; }
-                if (char === '"') { inString = !inString; continue; }
-                if (!inString) {
-                  if (char === '{') bracketCount++;
-                  else if (char === '}') {
-                    bracketCount--;
-                    if (bracketCount === 0) { endIdx = i; break; }
+            const openAITools = [
+              {
+                type: "function",
+                function: {
+                  name: "get_page_dom",
+                  description: "Retrieves the webpage text context, title, and URL of the active browser tab to answer user context questions.",
+                  parameters: { type: "object", properties: {} }
+                }
+              },
+              {
+                type: "function",
+                function: {
+                  name: "get_page_screenshot",
+                  description: "Captures a visual screenshot of the current visible tab's viewport as base64 JPEG image data.",
+                  parameters: { type: "object", properties: {} }
+                }
+              },
+              {
+                type: "function",
+                function: {
+                  name: "click_element",
+                  description: "Clicks an element on the webpage of the active browser tab by its CSS selector or text context.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      selector: { type: "string", description: "CSS selector of the element to click." },
+                      textContext: { type: "string", description: "Optional text inside the element." }
+                    },
+                    required: ["selector"]
+                  }
+                }
+              },
+              {
+                type: "function",
+                function: {
+                  name: "click_at_coordinate",
+                  description: "Clicks at a specific coordinate and optionally types text.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      x: { type: "number" },
+                      y: { type: "number" },
+                      coordinateType: { type: "string", enum: ["percentage", "pixels"] },
+                      typeText: { type: "string" },
+                      submitAfter: { type: "boolean" }
+                    },
+                    required: ["x", "y"]
+                  }
+                }
+              },
+              {
+                type: "function",
+                function: {
+                  name: "type_text",
+                  description: "Types text into input fields.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      selector: { type: "string" },
+                      text: { type: "string" },
+                      submitAfter: { type: "boolean" }
+                    },
+                    required: ["selector", "text"]
+                  }
+                }
+              },
+              {
+                type: "function",
+                function: {
+                  name: "scroll_page",
+                  description: "Scrolls the webpage.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      direction: { type: "string", enum: ["up", "down", "left", "right"] },
+                      amount: { type: "number" }
+                    },
+                    required: ["direction"]
+                  }
+                }
+              },
+              {
+                type: "function",
+                function: {
+                  name: "open_tab",
+                  description: "Opens a new tab.",
+                  parameters: {
+                    type: "object",
+                    properties: { url: { type: "string" } },
+                    required: ["url"]
+                  }
+                }
+              },
+              {
+                type: "function",
+                function: {
+                  name: "search_web",
+                  description: "Performs search.",
+                  parameters: {
+                    type: "object",
+                    properties: { query: { type: "string" } },
+                    required: ["query"]
                   }
                 }
               }
+            ];
 
-              if (endIdx !== -1) {
-                const jsonStr = buffer.substring(startIdx, endIdx + 1);
+            response = await fetchWithBackoff(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + simOpenaiApiKey
+              },
+              signal: controller.signal,
+              body: JSON.stringify({
+                model: simOpenaiModelId,
+                messages: formattedMessages,
+                stream: true,
+                tools: openAITools
+              })
+            });
+
+            if (!response.ok) {
+              const err = await response.json();
+              throw new Error(err.error?.message || `HTTP ${response.status}`);
+            }
+
+            if (!response.body) {
+              throw new Error("ReadableStream not supported on this browser.");
+            }
+
+            setSimLoading(false);
+
+            const reader = response.body.getReader();
+            let openaiToolCalls: any[] = [];
+
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+
+              const chunk = decoder.decode(value, { stream: true });
+              buffer += chunk;
+
+              const lines = buffer.split("\n");
+              buffer = lines.pop() || "";
+
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith("data:")) continue;
+                const data = trimmed.slice(5).trim();
+                if (data === "[DONE]") continue;
+
                 try {
-                  const obj = JSON.parse(jsonStr);
-                  const parts = obj.candidates?.[0]?.content?.parts;
-                  if (parts) {
-                    rawModelParts.push(...parts);
-                    for (const part of parts) {
-                      if (part.text) {
-                        const isThought = !!part.thought;
-                        if (isThought && !inThinkingBlock) {
-                          accumulatedText += "<thinking>" + part.text;
-                          inThinkingBlock = true;
-                        } else if (!isThought && inThinkingBlock) {
-                          accumulatedText += "</thinking>" + part.text;
-                          inThinkingBlock = false;
-                        } else {
-                          accumulatedText += part.text;
-                        }
+                  const parsed = JSON.parse(data);
+                  const choice = parsed.choices?.[0];
+                  if (choice) {
+                    const delta = choice.delta;
+                    if (delta) {
+                      if (delta.content) {
+                        accumulatedText += delta.content;
                         setSimMessages((prev) =>
                           prev.map((msg) =>
                             msg.id === turnMsgId ? { ...msg, text: accumulatedText } : msg
                           )
                         );
                       }
-                      if (part.functionCall) {
-                        activeFunctionCall = part.functionCall;
+                      if (delta.tool_calls) {
+                        delta.tool_calls.forEach((tc: any) => {
+                          const idx = tc.index ?? 0;
+                          if (!openaiToolCalls[idx]) {
+                            openaiToolCalls[idx] = { id: "", name: "", arguments: "" };
+                          }
+                          if (tc.id) openaiToolCalls[idx].id = tc.id;
+                          if (tc.function) {
+                            if (tc.function.name) openaiToolCalls[idx].name += tc.function.name;
+                            if (tc.function.arguments) openaiToolCalls[idx].arguments += tc.function.arguments;
+                          }
+                        });
                       }
                     }
                   }
-                } catch (e) {
-                  console.warn("Could not parse JSON object in stream:", e);
-                }
-                b = endIdx + 1;
-              } else {
-                break;
+                } catch (e) {}
               }
             }
-            buffer = buffer.substring(b);
-          }
 
-          if (inThinkingBlock) {
-            accumulatedText += "</thinking>";
-            inThinkingBlock = false;
-            setSimMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === turnMsgId ? { ...msg, text: accumulatedText } : msg
-              )
-            );
+            if (openaiToolCalls.length > 0) {
+              const firstCall = openaiToolCalls[0];
+              let parsedArgs = {};
+              try { parsedArgs = JSON.parse(firstCall.arguments); } catch(e) {}
+              activeFunctionCall = {
+                name: firstCall.name,
+                args: parsedArgs
+              };
+              rawModelParts = [
+                { text: accumulatedText || "Executing browser tools..." },
+                {
+                  functionCall: {
+                    name: firstCall.name,
+                    args: parsedArgs
+                  }
+                }
+              ];
+            } else {
+              rawModelParts = [{ text: accumulatedText }];
+            }
+
+          } else {
+            // Google Gemini
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModelId}:streamGenerateContent?key=${simApiKey}`;
+            
+            response = await fetchWithBackoff(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
+              body: JSON.stringify({
+                contents: optimizedHistory,
+                systemInstruction: {
+                  parts: [{
+                    text: "You are Gemini Web Companion, an advanced browser assistant Chrome Extension.\nYou help users analyze web pages, answer questions, and perform research.\nYou can call 'get_page_dom' to get webpage text, 'get_page_screenshot' to get a visual screenshot, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, and 'search_web' to perform search queries.\n\nCRITICAL RULES:\n- Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.\n- Never output raw base64 data, gibberish strings, or repeating binary characters.\n- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n- Keep explanations conversational, elegant, and markdown-formatted."
+                  }]
+                },
+                tools: [{
+                  functionDeclarations: [
+                    {
+                      name: "get_page_dom",
+                      description: "Retrieves the webpage text context, title, and URL of the active browser tab to answer user context questions.",
+                      parameters: { type: "OBJECT", properties: {} }
+                    },
+                    {
+                      name: "get_page_screenshot",
+                      description: "Captures a visual screenshot of the current visible tab's viewport as base64 JPEG image data.",
+                      parameters: { type: "OBJECT", properties: {} }
+                    },
+                    {
+                      name: "click_element",
+                      description: "Clicks an element on the webpage of the active browser tab by its CSS selector or text context.",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          selector: {
+                            type: "STRING",
+                            description: "CSS selector of the element to click (e.g. 'button', '#submit', '.btn-login', 'a')."
+                          },
+                          textContext: {
+                            type: "STRING",
+                            description: "Optional case-insensitive text inside the element to click (e.g. 'Submit', 'Log In', 'Sign Up')."
+                          }
+                        },
+                        required: ["selector"]
+                      }
+                    },
+                    {
+                      name: "click_at_coordinate",
+                      description: "Clicks at a specific coordinate (pixel or percentage) on the active tab's screen to select elements, focus rich-text areas, or click canvas-based elements, and optionally types text.",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          x: {
+                            type: "NUMBER",
+                            description: "X-coordinate (e.g. 50 for 50% width, or 640 for pixel coordinate)."
+                          },
+                          y: {
+                            type: "NUMBER",
+                            description: "Y-coordinate (e.g. 30 for 30% height, or 480 for pixel coordinate)."
+                          },
+                          coordinateType: {
+                            type: "STRING",
+                            description: "Specify whether coordinates are in 'percentage' (0 to 100) or 'pixels'. Defaults to 'percentage'.",
+                            enum: ["percentage", "pixels"]
+                          },
+                          typeText: {
+                            type: "STRING",
+                            description: "Optional text to type immediately after clicking (focuses and simulates entering text into rich-text, contenteditable, or standard inputs)."
+                          },
+                          submitAfter: {
+                            type: "BOOLEAN",
+                            description: "Whether to submit or hit Enter after typing."
+                          }
+                        },
+                        required: ["x", "y"]
+                      }
+                    },
+                    {
+                      name: "type_text",
+                      description: "Types text into an input, textarea, contenteditable div or rich-text editor on the webpage of the active browser tab.",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          selector: {
+                            type: "STRING",
+                            description: "CSS selector of the input/textarea/editor to type into (e.g. 'input[type=\"text\"]', '#search-input', '.ql-editor', '.ProseMirror')."
+                          },
+                          text: {
+                            type: "STRING",
+                            description: "The text string to type into the element."
+                          },
+                          submitAfter: {
+                            type: "BOOLEAN",
+                            description: "Whether to submit or hit Enter after typing."
+                          }
+                        },
+                        required: ["selector", "text"]
+                      }
+                    },
+                    {
+                      name: "scroll_page",
+                      description: "Scrolls the webpage in a given direction by a specified pixel amount or percentage.",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          direction: {
+                            type: "STRING",
+                            description: "The direction to scroll.",
+                            enum: ["up", "down", "left", "right"]
+                          },
+                          amount: {
+                            type: "NUMBER",
+                            description: "Optional pixel amount to scroll. If omitted, defaults to 75% of the viewport height/width."
+                          }
+                        },
+                        required: ["direction"]
+                      }
+                    },
+                    {
+                      name: "open_tab",
+                      description: "Opens a new browser tab with the specified URL.",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          url: {
+                            type: "STRING",
+                            description: "The complete URL to open (e.g., 'https://www.google.com')."
+                          }
+                        },
+                        required: ["url"]
+                      }
+                    },
+                    {
+                      name: "search_web",
+                      description: "Performs a web search for the specified query and navigates to the search results.",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          query: {
+                            type: "STRING",
+                            description: "The search query string."
+                          }
+                        },
+                        required: ["query"]
+                      }
+                    }
+                  ]
+                }]
+              })
+            });
+
+            if (!response.ok) {
+              const err = await response.json();
+              throw new Error(err.error?.message || `HTTP ${response.status}`);
+            }
+
+            if (!response.body) {
+              throw new Error("ReadableStream not supported on this browser.");
+            }
+
+            setSimLoading(false);
+
+            const reader = response.body.getReader();
+
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+
+              const chunk = decoder.decode(value, { stream: true });
+              buffer += chunk;
+
+              let b = 0;
+              while (b < buffer.length) {
+                const startIdx = buffer.indexOf('{', b);
+                if (startIdx === -1) break;
+
+                let bracketCount = 0;
+                let endIdx = -1;
+                let inString = false;
+                let escape = false;
+
+                for (let i = startIdx; i < buffer.length; i++) {
+                  const char = buffer[i];
+                  if (escape) { escape = false; continue; }
+                  if (char === '\\') { escape = true; continue; }
+                  if (char === '"') { inString = !inString; continue; }
+                  if (!inString) {
+                    if (char === '{') bracketCount++;
+                    else if (char === '}') {
+                      bracketCount--;
+                      if (bracketCount === 0) { endIdx = i; break; }
+                    }
+                  }
+                }
+
+                if (endIdx !== -1) {
+                  const jsonStr = buffer.substring(startIdx, endIdx + 1);
+                  try {
+                    const obj = JSON.parse(jsonStr);
+                    const parts = obj.candidates?.[0]?.content?.parts;
+                    if (parts) {
+                      rawModelParts.push(...parts);
+                      for (const part of parts) {
+                        if (part.text) {
+                          const isThought = !!part.thought;
+                          if (isThought && !inThinkingBlock) {
+                            accumulatedText += "<thinking>" + part.text;
+                            inThinkingBlock = true;
+                          } else if (!isThought && inThinkingBlock) {
+                            accumulatedText += "</thinking>" + part.text;
+                            inThinkingBlock = false;
+                          } else {
+                            accumulatedText += part.text;
+                          }
+                          setSimMessages((prev) =>
+                            prev.map((msg) =>
+                              msg.id === turnMsgId ? { ...msg, text: accumulatedText } : msg
+                            )
+                          );
+                        }
+                        if (part.functionCall) {
+                          activeFunctionCall = part.functionCall;
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    console.warn("Could not parse JSON object in stream:", e);
+                  }
+                  b = endIdx + 1;
+                } else {
+                  break;
+                }
+              }
+              buffer = buffer.substring(b);
+            }
+
+            if (inThinkingBlock) {
+              accumulatedText += "</thinking>";
+              inThinkingBlock = false;
+              setSimMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === turnMsgId ? { ...msg, text: accumulatedText } : msg
+                )
+              );
+            }
           }
 
           if (activeFunctionCall) {
@@ -2469,6 +2909,97 @@ export default function App() {
                   message: `[Simulator Fallback] Typed "${txt}" into virtual input field matching '${sel}'.`
                 };
               }
+            } else if (activeFunctionCall.name === "scroll_page") {
+              const dir = activeFunctionCall.args?.direction || "down";
+              const amt = activeFunctionCall.args?.amount || 500;
+              const viewport = (document.getElementById("simulated-webpage-viewport") || window) as any;
+              let scrollX = 0;
+              let scrollY = 0;
+              if (dir === "down") scrollY = amt;
+              else if (dir === "up") scrollY = -amt;
+              else if (dir === "right") scrollX = amt;
+              else if (dir === "left") scrollX = -amt;
+
+              if (viewport.scrollBy) {
+                viewport.scrollBy({ left: scrollX, top: scrollY, behavior: "smooth" });
+              } else {
+                viewport.scrollLeft += scrollX;
+                viewport.scrollTop += scrollY;
+              }
+              toolOutput = {
+                success: true,
+                message: `[Simulator] Scrolled page ${dir} by ${amt} pixels.`
+              };
+            } else if (activeFunctionCall.name === "open_tab") {
+              const url = activeFunctionCall.args?.url || "https://example.com";
+              const newTabId = Date.now();
+              const hostname = url.replace("https://", "").replace("http://", "").split("/")[0];
+              const newTab = {
+                id: newTabId,
+                title: hostname.charAt(0).toUpperCase() + hostname.slice(1) || "New Tab",
+                url: url,
+                icon: "🌐",
+                screenshot: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=400&q=80",
+                text: `Successfully opened new tab. This is a live simulation of the page at ${url}.\n\nYou are currently viewing this tab. You can interact with its elements, scroll, click, or scrape the context.`
+              };
+              setSimTabs(prev => [...prev, newTab]);
+              setActiveSimTabId(newTabId);
+
+              // Auto-capture context for the extension simulator
+              setSimAttachment({
+                name: `Capture: ${newTab.title}`,
+                size: "Current Webpage (DOM + HTML)",
+                type: "image/jpeg",
+                isImage: true,
+                base64: newTab.screenshot,
+                domContext: {
+                  title: newTab.title,
+                  url: newTab.url,
+                  text: newTab.text
+                }
+              });
+
+              toolOutput = {
+                success: true,
+                tabId: newTabId,
+                url: url,
+                message: `[Simulator] Successfully opened a new tab: ${url} and loaded its context.`
+              };
+            } else if (activeFunctionCall.name === "search_web") {
+              const query = activeFunctionCall.args?.query || "";
+              const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+              const newTabId = Date.now();
+              const newTab = {
+                id: newTabId,
+                title: `Google Search: ${query}`,
+                url: searchUrl,
+                icon: "🔍",
+                screenshot: "https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&w=400&q=80",
+                text: `Google Search Results for "${query}":\n\n1. ${query} Official Site - Complete features & developer resources.\n2. Getting Started with ${query} - Beginner guides & fast tutorial.\n3. Community Forum - Join discussions and ask questions about ${query}.`
+              };
+              setSimTabs(prev => [...prev, newTab]);
+              setActiveSimTabId(newTabId);
+
+              // Auto-capture context for the extension simulator
+              setSimAttachment({
+                name: `Capture: ${newTab.title}`,
+                size: "Current Webpage (DOM + HTML)",
+                type: "image/jpeg",
+                isImage: true,
+                base64: newTab.screenshot,
+                domContext: {
+                  title: newTab.title,
+                  url: newTab.url,
+                  text: newTab.text
+                }
+              });
+
+              toolOutput = {
+                success: true,
+                tabId: newTabId,
+                query: query,
+                message: `[Simulator] Searched the web for "${query}" and loaded the search results tab.`
+              };
             }
 
             // Append status note to the assistant's text
@@ -2479,14 +3010,19 @@ export default function App() {
               responseNote = `Clicked coordinate (${activeFunctionCall.args?.x || 0}, ${activeFunctionCall.args?.y || 0})!`;
             } else if (activeFunctionCall.name === "type_text") {
               responseNote = `Typed text: "${activeFunctionCall.args?.text || ""}"`;
+            } else if (activeFunctionCall.name === "scroll_page") {
+              responseNote = `Scrolled page ${activeFunctionCall.args?.direction || "down"}!`;
+            } else if (activeFunctionCall.name === "open_tab") {
+              responseNote = `Opened new tab: ${activeFunctionCall.args?.url || ""}`;
+            } else if (activeFunctionCall.name === "search_web") {
+              responseNote = `Searched web for "${activeFunctionCall.args?.query || ""}"`;
             }
 
             let screenshotUrl = "";
             if (activeFunctionCall.name === "get_page_screenshot") {
-              const defaultTab = SIM_MOCK_TABS[0];
-              const tabTitle = simAttachment?.domContext?.title || defaultTab.title;
-              const tabUrl = simAttachment?.domContext?.url || defaultTab.url;
-              const tabText = simAttachment?.domContext?.text || defaultTab.text;
+              const tabTitle = simAttachment?.domContext?.title || activeSimTab.title;
+              const tabUrl = simAttachment?.domContext?.url || activeSimTab.url;
+              const tabText = simAttachment?.domContext?.text || activeSimTab.text;
               screenshotUrl = generateMockScreenshot(tabTitle, tabUrl, tabText);
             }
 
@@ -2521,10 +3057,9 @@ export default function App() {
             ];
 
             if (activeFunctionCall.name === "get_page_screenshot") {
-              const defaultTab = SIM_MOCK_TABS[0];
-              const tabTitle = simAttachment?.domContext?.title || defaultTab.title;
-              const tabUrl = simAttachment?.domContext?.url || defaultTab.url;
-              const tabText = simAttachment?.domContext?.text || defaultTab.text;
+              const tabTitle = simAttachment?.domContext?.title || activeSimTab.title;
+              const tabUrl = simAttachment?.domContext?.url || activeSimTab.url;
+              const tabText = simAttachment?.domContext?.text || activeSimTab.text;
               const base64Url = generateMockScreenshot(tabTitle, tabUrl, tabText);
               const cleanBase64 = base64Url.split(",")[1];
               responseParts.push({
@@ -2956,7 +3491,7 @@ To install this tool directly into your Chrome browser, check out the **Installa
               {/* Address bar */}
               <div className="bg-slate-950 border border-slate-850 rounded-md px-3 py-0.5 flex items-center gap-2 flex-1 text-left">
                 <Globe className="w-2.5 h-2.5 text-slate-500" />
-                <span className="text-[9px] text-slate-400 font-mono truncate select-all flex-1">https://ai.google.dev/blog/gemini-web-companion</span>
+                <span className="text-[9px] text-slate-400 font-mono truncate select-all flex-1">{activeSimTab.url}</span>
               </div>
 
               {/* Extension Bar Icons */}
@@ -2981,30 +3516,25 @@ To install this tool directly into your Chrome browser, check out the **Installa
               {/* LEFT SIDE: Mock Article Webpage */}
               <div id="simulated-webpage-viewport" className="hidden sm:flex sm:flex-col sm:flex-1 bg-slate-950 p-4 overflow-y-auto border-r border-slate-800/80 text-left relative">
                 <div className="border-b border-slate-800 pb-3 mb-3">
-                  <div className="text-blue-500 font-mono text-[9px] uppercase font-bold tracking-wider">Research Article</div>
+                  <div className="text-blue-500 font-mono text-[9px] uppercase font-bold tracking-wider">
+                    {activeSimTab.url.includes("search") ? "Web Search" : "Browser Tab"}
+                  </div>
                   <h2 className="text-sm font-bold text-white mt-1 leading-snug">
-                    How Gemini Models are Reshaping Browser Workflows
+                    {activeSimTab.title}
                   </h2>
-                  <div className="text-[9px] text-slate-500 mt-1">Published June 2026 • 4 min read</div>
+                  <div className="text-[9px] text-slate-500 mt-1">URL: {activeSimTab.url}</div>
                 </div>
 
                 <div className="space-y-3 text-[11px]">
-                  <p className="text-slate-300 leading-relaxed">
-                    Traditional web browsers were built as static document viewers. However, the integration of 
-                    <span className="bg-blue-500/10 text-blue-400 px-1 py-0.5 rounded font-medium mx-1">Manifest V3 Side Panels</span>
-                    and high-context models transforms them into active runtime workspaces.
+                  <p className="text-slate-300 leading-relaxed whitespace-pre-wrap">
+                    {activeSimTab.text}
                   </p>
-                  
-                  <div className="rounded-lg bg-slate-900 border border-slate-800 p-2.5 text-slate-400 leading-relaxed border-l-2 border-l-blue-500 font-serif italic">
-                    "The standard popup extension closes as soon as the user clicks anywhere else. 
-                    By migrating to a <strong>persistent side panel layout</strong>, Gemini remains actively 
-                    docked next to your browsing viewport."
-                  </div>
 
-                  <p className="text-slate-300 leading-relaxed">
-                    This sidebar is fully context-aware. With a single click, users can capture the page DOM 
-                    or query visual layouts directly.
-                  </p>
+                  {activeSimTab.screenshot && (
+                    <div className="rounded-lg overflow-hidden border border-slate-800/60 max-h-[140px] bg-slate-900 flex items-center justify-center">
+                      <img src={activeSimTab.screenshot} alt="Page Visual" className="w-full object-cover" referrerPolicy="no-referrer" />
+                    </div>
+                  )}
 
                   {/* Simulated webpage highlight */}
                   <div className="p-2.5 bg-blue-950/20 border border-blue-500/20 rounded-lg">
@@ -3013,14 +3543,14 @@ To install this tool directly into your Chrome browser, check out the **Installa
                       <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1 rounded font-mono">Ready</span>
                     </div>
                     <div className="text-slate-400 text-[9px] font-mono leading-relaxed bg-slate-950 p-1.5 rounded border border-slate-900/60 max-h-[80px] overflow-y-auto">
-                      Title: Reshaping Browser Workflows<br />
-                      URL: https://ai.google.dev/blog/gemini-web-companion<br />
-                      DOM Text: Manifest V3 Side Panels and high-context models transform browsers into active runtime workspaces...
+                      Title: {activeSimTab.title}<br />
+                      URL: {activeSimTab.url}<br />
+                      DOM Text: {activeSimTab.text.substring(0, 150)}...
                     </div>
                   </div>
 
                   <button 
-                    onClick={handleSimScreenCapture}
+                    onClick={() => handleSelectSimTab(activeSimTab)}
                     className="w-full py-2 bg-gradient-to-r from-blue-600/90 to-violet-600/90 hover:from-blue-600 hover:to-violet-600 text-white font-medium rounded-md transition text-[10px] flex items-center justify-center gap-1.5 shadow-md"
                   >
                     <span>📸</span>
@@ -3166,50 +3696,132 @@ To install this tool directly into your Chrome browser, check out the **Installa
                     
                     <div className="space-y-2">
                       <div className="flex flex-col gap-1">
-                        <label className="text-[9px] font-medium text-slate-400">Gemini API Key</label>
-                        <div className="flex gap-1">
-                          <input
-                            type={simShowKey ? "text" : "password"}
-                            value={simApiKey}
-                            onChange={(e) => setSimApiKey(e.target.value)}
-                            placeholder="Paste your Gemini API Key..."
-                            className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-100 flex-1 outline-none focus:border-blue-500"
-                          />
-                          <button
-                            onClick={() => setSimShowKey(!simShowKey)}
-                            className="p-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300"
-                          >
-                            {simShowKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[9px] font-medium text-slate-400">Select Model</label>
+                        <label className="text-[9px] font-medium text-slate-400">API Provider</label>
                         <select
-                          value={simModel}
-                          onChange={(e) => setSimModel(e.target.value)}
+                          value={simProvider}
+                          onChange={(e) => setSimProvider(e.target.value as any)}
                           className="bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] text-slate-100 outline-none focus:border-blue-500"
                         >
-                          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                          <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-                          <option value="gemini-1.5-flash">gemini-1.5-flash</option>
-                          <option value="gemini-1.5-pro">gemini-1.5-pro</option>
-                          <option value="custom">-- Custom Model --</option>
+                          <option value="gemini">Google Gemini API</option>
+                          <option value="openai-compatible">OpenAI-Compatible API</option>
                         </select>
                       </div>
 
-                      {simModel === "custom" && (
-                        <div className="flex flex-col gap-1">
-                          <label className="text-[9px] font-medium text-slate-400">Custom Model ID</label>
-                          <input
-                            type="text"
-                            value={simCustomModel}
-                            onChange={(e) => setSimCustomModel(e.target.value)}
-                            placeholder="e.g. gemini-3.5-flash"
-                            className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-[11px] text-slate-100 outline-none"
-                          />
-                        </div>
+                      {simProvider === "gemini" ? (
+                        <>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[9px] font-medium text-slate-400">Gemini API Key</label>
+                            <div className="flex gap-1">
+                              <input
+                                type={simShowKey ? "text" : "password"}
+                                value={simApiKey}
+                                onChange={(e) => setSimApiKey(e.target.value)}
+                                placeholder="Paste your Gemini API Key..."
+                                className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-100 flex-1 outline-none focus:border-blue-500"
+                              />
+                              <button
+                                onClick={() => setSimShowKey(!simShowKey)}
+                                className="p-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300"
+                              >
+                                {simShowKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[9px] font-medium text-slate-400">Select Model</label>
+                            <select
+                              value={simModel}
+                              onChange={(e) => setSimModel(e.target.value)}
+                              className="bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] text-slate-100 outline-none focus:border-blue-500"
+                            >
+                              <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                              <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                              <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                              <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                              <option value="custom">-- Custom Model --</option>
+                            </select>
+                          </div>
+
+                          {simModel === "custom" && (
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[9px] font-medium text-slate-400">Custom Model ID</label>
+                              <input
+                                type="text"
+                                value={simCustomModel}
+                                onChange={(e) => setSimCustomModel(e.target.value)}
+                                placeholder="e.g. gemini-3.5-flash"
+                                className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-[11px] text-slate-100 outline-none"
+                              />
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[9px] font-medium text-slate-400">Base URL</label>
+                            <input
+                              type="text"
+                              value={simOpenaiBaseUrl}
+                              onChange={(e) => setSimOpenaiBaseUrl(e.target.value)}
+                              placeholder="e.g. https://api.openai.com/v1"
+                              className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-[11px] text-slate-100 outline-none focus:border-blue-500"
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[9px] font-medium text-slate-400">API Key</label>
+                            <div className="flex gap-1">
+                              <input
+                                type={simShowKey ? "text" : "password"}
+                                value={simOpenaiApiKey}
+                                onChange={(e) => setSimOpenaiApiKey(e.target.value)}
+                                placeholder="Paste your API Key..."
+                                className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-100 flex-1 outline-none focus:border-blue-500"
+                              />
+                              <button
+                                onClick={() => setSimShowKey(!simShowKey)}
+                                className="p-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300"
+                              >
+                                {simShowKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[9px] font-medium text-slate-400">Model ID</label>
+                            <input
+                              type="text"
+                              value={simOpenaiModelId}
+                              onChange={(e) => setSimOpenaiModelId(e.target.value)}
+                              placeholder="e.g. gpt-4o-mini"
+                              className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-[11px] text-slate-100 outline-none focus:border-blue-500"
+                            />
+                          </div>
+
+                          <div className="pt-1.5 flex flex-col gap-1.5 border-t border-slate-700/60 mt-1">
+                            <button
+                              onClick={handleSimScanOpenai}
+                              disabled={simScanningOpenai}
+                              className="w-full bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-200 font-medium rounded py-1 text-[10px] transition cursor-pointer flex items-center justify-center gap-1.5"
+                            >
+                              {simScanningOpenai ? (
+                                <>
+                                  <span className="w-2.5 h-2.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+                                  Scanning...
+                                </>
+                              ) : (
+                                "🔍 Scan Model Capabilities"
+                              )}
+                            </button>
+
+                            {simScanResults && (
+                              <pre className="p-1.5 bg-slate-900 border border-slate-700/50 rounded text-[9px] font-mono text-slate-300 whitespace-pre-wrap leading-tight">
+                                {simScanResults}
+                              </pre>
+                            )}
+                          </div>
+                        </>
                       )}
                     </div>
 
@@ -3217,13 +3829,14 @@ To install this tool directly into your Chrome browser, check out the **Installa
                       <button
                         onClick={() => {
                           setSimSettingsOpen(false);
+                          const hasKey = simProvider === "openai-compatible" ? !!simOpenaiApiKey : !!simApiKey;
                           setSimMessages((prev) => [
                             ...prev,
                             {
                               id: Date.now(),
                               role: "assistant",
-                              text: simApiKey 
-                                ? "✅ API Key saved! You can now send real queries directly to Gemini models."
+                              text: hasKey 
+                                ? `✅ Settings saved! Using ${simProvider === "openai-compatible" ? "OpenAI-Compatible model: " + simOpenaiModelId : "Google Gemini"}.`
                                 : "⚠️ No API Key entered. Real connections are paused; falling back to simulated analysis modes."
                             }
                           ]);
@@ -3240,9 +3853,9 @@ To install this tool directly into your Chrome browser, check out the **Installa
                 <main className="flex-1 overflow-y-auto p-3.5 space-y-3.5 bg-slate-950 text-left">
                   
                   {/* Alert Warning for empty API Key in Simulator */}
-                  {!simApiKey && (
+                  {((simProvider === "gemini" && !simApiKey) || (simProvider === "openai-compatible" && !simOpenaiApiKey)) && (
                     <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-400 text-[10px] leading-relaxed">
-                      ⚠️ <strong>Real Gemini request mode is paused.</strong> Enter your key via settings (⚙️) above for live model generation.
+                      ⚠️ <strong>Real request mode is paused.</strong> Enter your {simProvider === "openai-compatible" ? "OpenAI API" : "Gemini API"} key via settings (⚙️) above for live model generation.
                     </div>
                   )}
 

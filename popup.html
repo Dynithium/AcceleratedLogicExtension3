@@ -41,27 +41,64 @@
       </div>
       <div class="settings-body">
         <div class="form-group">
-          <label for="input-api-key">Gemini API Key</label>
-          <div class="input-with-action">
-            <input type="password" id="input-api-key" placeholder="Enter your Gemini API Key..." />
-            <button id="btn-toggle-key-visibility" class="text-button">Show</button>
-          </div>
-          <p class="help-text">Stored securely in your local browser storage.</p>
-        </div>
-        <div class="form-group">
-          <label for="select-model">Model Selection</label>
-          <select id="select-model">
-            <option value="gemini-2.5-flash">gemini-2.5-flash (Recommended)</option>
-            <option value="gemini-2.5-pro">gemini-2.5-pro (High intelligence)</option>
-            <option value="gemini-1.5-flash">gemini-1.5-flash</option>
-            <option value="gemini-1.5-pro">gemini-1.5-pro</option>
-            <option value="custom">-- Custom Model ID --</option>
+          <label for="select-provider">API Provider</label>
+          <select id="select-provider" style="width: 100%; padding: 8px; border-radius: 6px; background: var(--panel-2, #181c1f); color: var(--text, #e7eaec); border: 1px solid var(--border, #23282c); font-family: inherit;">
+            <option value="gemini">Gemini API (Google AI Studio)</option>
+            <option value="openai-compatible">OpenAI-Compatible API (Custom / Local)</option>
           </select>
         </div>
-        <div class="form-group" id="custom-model-group" style="display: none;">
-          <label for="input-custom-model">Custom Model ID</label>
-          <input type="text" id="input-custom-model" placeholder="e.g. gemini-3.5-flash" value="gemini-2.5-flash" />
+
+        <!-- Gemini Settings Group -->
+        <div id="gemini-settings-group">
+          <div class="form-group">
+            <label for="input-api-key">Gemini API Key</label>
+            <div class="input-with-action">
+              <input type="password" id="input-api-key" placeholder="Enter your Gemini API Key..." />
+              <button id="btn-toggle-key-visibility" class="text-button">Show</button>
+            </div>
+            <p class="help-text">Stored securely in your local browser storage.</p>
+          </div>
+          <div class="form-group">
+            <label for="select-model">Model Selection</label>
+            <select id="select-model">
+              <option value="gemini-2.5-flash">gemini-2.5-flash (Recommended)</option>
+              <option value="gemini-2.5-pro">gemini-2.5-pro (High intelligence)</option>
+              <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+              <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+              <option value="custom">-- Custom Model ID --</option>
+            </select>
+          </div>
+          <div class="form-group" id="custom-model-group" style="display: none;">
+            <label for="input-custom-model">Custom Model ID</label>
+            <input type="text" id="input-custom-model" placeholder="e.g. gemini-3.5-flash" value="gemini-2.5-flash" />
+          </div>
         </div>
+
+        <!-- OpenAI-Compatible Settings Group -->
+        <div id="openai-settings-group" style="display: none;">
+          <div class="form-group">
+            <label for="input-openai-base-url">Base URL</label>
+            <input type="text" id="input-openai-base-url" placeholder="https://api.openai.com/v1" value="https://api.openai.com/v1" />
+          </div>
+          <div class="form-group">
+            <label for="input-openai-api-key">API Key</label>
+            <div class="input-with-action">
+              <input type="password" id="input-openai-api-key" placeholder="sk-..." />
+              <button id="btn-toggle-openai-key-visibility" class="text-button">Show</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="input-openai-model-id">Model ID</label>
+            <input type="text" id="input-openai-model-id" placeholder="gpt-4o-mini" value="gpt-4o-mini" />
+          </div>
+          <div class="form-group">
+            <button id="btn-scan-openai" class="primary-button" style="width: 100%; margin-top: 5px; background: #1c2b3a; border-color: #2c4560; color: #bcd6f5;">🔍 Scan Model Capabilities</button>
+            <div id="openai-scan-results" style="margin-top: 8px; font-size: 11px; font-family: monospace; line-height: 1.4; color: #838d95;">
+              Capabilities: Not scanned
+            </div>
+          </div>
+        </div>
+
         <div class="settings-actions">
           <button id="btn-save-settings" class="primary-button">Save Settings</button>
         </div>
