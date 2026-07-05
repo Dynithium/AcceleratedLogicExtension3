@@ -2936,9 +2936,30 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                 viewport.scrollLeft += scrollX;
                 viewport.scrollTop += scrollY;
               }
+
+              await new Promise(r => setTimeout(r, 350));
+
+              const scrollTop = viewport === window ? (window.pageYOffset || document.documentElement.scrollTop) : viewport.scrollTop;
+              const scrollLeft = viewport === window ? (window.pageXOffset || document.documentElement.scrollLeft) : viewport.scrollLeft;
+              const scrollHeight = viewport === window ? document.documentElement.scrollHeight : viewport.scrollHeight;
+              const scrollWidth = viewport === window ? document.documentElement.scrollWidth : viewport.scrollWidth;
+              const clientHeight = viewport === window ? window.innerHeight : viewport.clientHeight;
+              const clientWidth = viewport === window ? window.innerWidth : viewport.clientWidth;
+              const maxScrollTop = Math.max(0, scrollHeight - clientHeight);
+              const maxScrollLeft = Math.max(0, scrollWidth - clientWidth);
+
               toolOutput = {
                 success: true,
-                message: `[Simulator] Scrolled page ${dir} by ${amt} pixels.`
+                message: `[Simulator] Scrolled page ${dir} by ${amt} pixels.`,
+                scrollPosition: {
+                  scrollTop: Math.round(scrollTop),
+                  scrollLeft: Math.round(scrollLeft),
+                  maxScrollTop: Math.round(maxScrollTop),
+                  maxScrollLeft: Math.round(maxScrollLeft),
+                  isAtTop: scrollTop <= 5,
+                  isAtBottom: scrollTop >= maxScrollTop - 5,
+                  scrollPercentage: maxScrollTop > 0 ? Math.round((scrollTop / maxScrollTop) * 100) : 0
+                }
               };
             } else if (activeFunctionCall.name === "open_tab") {
               const url = activeFunctionCall.args?.url || "https://example.com";

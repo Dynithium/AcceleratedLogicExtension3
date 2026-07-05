@@ -2439,9 +2439,30 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             viewport.scrollLeft += scrollX;
             viewport.scrollTop += scrollY;
           }
+
+          await new Promise(r => setTimeout(r, 350));
+
+          const scrollTop = viewport === window ? (window.pageYOffset || document.documentElement.scrollTop) : viewport.scrollTop;
+          const scrollLeft = viewport === window ? (window.pageXOffset || document.documentElement.scrollLeft) : viewport.scrollLeft;
+          const scrollHeight = viewport === window ? document.documentElement.scrollHeight : viewport.scrollHeight;
+          const scrollWidth = viewport === window ? document.documentElement.scrollWidth : viewport.scrollWidth;
+          const clientHeight = viewport === window ? window.innerHeight : viewport.clientHeight;
+          const clientWidth = viewport === window ? window.innerWidth : viewport.clientWidth;
+          const maxScrollTop = Math.max(0, scrollHeight - clientHeight);
+          const maxScrollLeft = Math.max(0, scrollWidth - clientWidth);
+
           resolve({
             success: true,
-            message: `[Simulator] Scrolled page ${dir} by ${amt} pixels.`
+            message: `[Simulator] Scrolled page ${dir} by ${amt} pixels.`,
+            scrollPosition: {
+              scrollTop: Math.round(scrollTop),
+              scrollLeft: Math.round(scrollLeft),
+              maxScrollTop: Math.round(maxScrollTop),
+              maxScrollLeft: Math.round(maxScrollLeft),
+              isAtTop: scrollTop <= 5,
+              isAtBottom: scrollTop >= maxScrollTop - 5,
+              scrollPercentage: maxScrollTop > 0 ? Math.round((scrollTop / maxScrollTop) * 100) : 0
+            }
           });
         } else if (name === "open_tab") {
           const url = args.url;
@@ -3114,18 +3135,118 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           chrome.scripting.executeScript({
             target: { tabId: activeTab.id },
             args: [dir, amt],
-            func: (direction, amount) => {
-              const scrollAmt = amount || (window.innerHeight * 0.75);
+            func: async (direction, amount) => {
+              const getScrollableElements = () => {
+                const elems = Array.from(document.querySelectorAll('*'));
+                return elems.filter(el => {
+                  const style = window.getComputedStyle(el);
+                  const isScrollableY = (style.overflowY === 'auto' || style.overflowY === 'scroll') && el.scrollHeight > el.clientHeight;
+                  const isScrollableX = (style.overflowX === 'auto' || style.overflowX === 'scroll') && el.scrollWidth > el.clientWidth;
+                  return (isScrollableY || isScrollableX) && el.getBoundingClientRect().height > 50;
+                });
+              };
+
+              let target = window;
+              let isWindow = true;
+
+              const getMetrics = () => {
+                let scrollTop = 0;
+                let scrollLeft = 0;
+                let scrollHeight = 0;
+                let scrollWidth = 0;
+                let clientHeight = 0;
+                let clientWidth = 0;
+
+                if (isWindow) {
+                  scrollTop = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop;
+                  scrollLeft = window.pageXOffset || document.documentElement.scrollLeft || document.body.scrollLeft;
+                  scrollHeight = document.documentElement.scrollHeight || document.body.scrollHeight;
+                  scrollWidth = document.documentElement.scrollWidth || document.body.scrollWidth;
+                  clientHeight = window.innerHeight || document.documentElement.clientHeight;
+                  clientWidth = window.innerWidth || document.documentElement.clientWidth;
+                } else {
+                  const el = target;
+                  scrollTop = el.scrollTop;
+                  scrollLeft = el.scrollLeft;
+                  scrollHeight = el.scrollHeight;
+                  scrollWidth = el.scrollWidth;
+                  clientHeight = el.clientHeight;
+                  clientWidth = el.clientWidth;
+                }
+
+                const maxScrollTop = Math.max(0, scrollHeight - clientHeight);
+                const maxScrollLeft = Math.max(0, scrollWidth - clientWidth);
+                return {
+                  scrollTop,
+                  scrollLeft,
+                  scrollHeight,
+                  scrollWidth,
+                  clientHeight,
+                  clientWidth,
+                  maxScrollTop,
+                  maxScrollLeft,
+                  isAtTop: scrollTop <= 5,
+                  isAtBottom: scrollTop >= maxScrollTop - 5
+                };
+              };
+
+              let metricsBefore = getMetrics();
+              const scrollAmt = amount || Math.round(metricsBefore.clientHeight * 0.75);
               let scrollX = 0;
               let scrollY = 0;
               if (direction === "down") scrollY = scrollAmt;
               else if (direction === "up") scrollY = -scrollAmt;
               else if (direction === "right") scrollX = scrollAmt;
               else if (direction === "left") scrollX = -scrollAmt;
+
+              // Apply scroll on window
               window.scrollBy({ left: scrollX, top: scrollY, behavior: 'smooth' });
+              await new Promise(r => setTimeout(r, 350));
+              
+              let metricsAfter = getMetrics();
+
+              // If window didn't scroll vertically and we aren't at the limit, find a custom scroll container
+              if (scrollY !== 0 && Math.abs(metricsAfter.scrollTop - metricsBefore.scrollTop) < 5 && !metricsBefore.isAtBottom && !metricsBefore.isAtTop) {
+                const scrollables = getScrollableElements();
+                if (scrollables.length > 0) {
+                  scrollables.sort((a, b) => b.scrollHeight - a.scrollHeight);
+                  target = scrollables[0];
+                  isWindow = false;
+                  
+                  metricsBefore = getMetrics();
+                  target.scrollBy({ left: 0, top: scrollY, behavior: 'smooth' });
+                  await new Promise(r => setTimeout(r, 350));
+                  metricsAfter = getMetrics();
+                }
+              }
+
+              // Try horizontal scroll container if needed
+              if (scrollX !== 0 && Math.abs(metricsAfter.scrollLeft - metricsBefore.scrollLeft) < 5 && !metricsBefore.isAtBottom && !metricsBefore.isAtTop) {
+                const scrollables = getScrollableElements();
+                if (scrollables.length > 0) {
+                  scrollables.sort((a, b) => b.scrollWidth - a.scrollWidth);
+                  target = scrollables[0];
+                  isWindow = false;
+                  
+                  metricsBefore = getMetrics();
+                  target.scrollBy({ left: scrollX, top: 0, behavior: 'smooth' });
+                  await new Promise(r => setTimeout(r, 350));
+                  metricsAfter = getMetrics();
+                }
+              }
+
               return {
                 success: true,
-                message: `Successfully scrolled ${direction} by ${scrollAmt}px.`
+                message: `Successfully scrolled ${direction} by ${scrollAmt}px.`,
+                scrollPosition: {
+                  scrollTop: Math.round(metricsAfter.scrollTop),
+                  scrollLeft: Math.round(metricsAfter.scrollLeft),
+                  maxScrollTop: Math.round(metricsAfter.maxScrollTop),
+                  maxScrollLeft: Math.round(metricsAfter.maxScrollLeft),
+                  isAtTop: metricsAfter.scrollTop <= 5,
+                  isAtBottom: metricsAfter.scrollTop >= metricsAfter.maxScrollTop - 5,
+                  scrollPercentage: metricsAfter.maxScrollTop > 0 ? Math.round((metricsAfter.scrollTop / metricsAfter.maxScrollTop) * 100) : 0
+                }
               };
             }
           }, (results) => {
