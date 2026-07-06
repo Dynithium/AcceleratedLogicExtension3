@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import { 
   Settings, 
   Sparkles, 
@@ -637,6 +639,140 @@ body {
   0%, 100% { opacity: 0.6; }
   50% { opacity: 1; }
 }
+
+/* Code Blocks and Inline Code Styling */
+.inline-code {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.75rem;
+  background-color: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  color: #fda4af;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.code-block-container {
+  border: 1px solid #334155;
+  background-color: #020617;
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 10px 0;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #1e293b;
+  padding: 6px 12px;
+  border-bottom: 1px solid #334155;
+}
+
+.code-block-lang {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.65rem;
+  color: #94a3b8;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.code-copy-btn {
+  background-color: #334155;
+  border: none;
+  color: #cbd5e1;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.code-copy-btn:hover {
+  background-color: #475569;
+  color: #f8fafc;
+}
+
+.code-block-content {
+  padding: 12px;
+  margin: 0;
+  overflow-x: auto;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: #e2e8f0;
+  background-color: #090d16;
+}
+
+.code-block-content code {
+  font-family: var(--font-mono), monospace !important;
+  white-space: pre;
+}
+
+/* LaTeX Formulas Styling */
+.latex-block {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 10px 0;
+  padding: 10px;
+  background-color: rgba(30, 41, 59, 0.4);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 8px;
+  overflow-x: auto;
+  font-family: "Cambria Math", "Times New Roman", Times, serif;
+  font-size: 0.95rem;
+  color: #f8fafc;
+}
+
+.latex-inline {
+  display: inline-block;
+  font-family: "Cambria Math", "Times New Roman", Times, serif;
+  font-style: italic;
+  color: #60a5fa;
+  padding: 0 2px;
+}
+
+.latex-frac {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  vertical-align: middle;
+  padding: 0 4px;
+}
+
+.latex-num {
+  border-bottom: 1px solid #94a3b8;
+  padding: 0 2px;
+  font-size: 0.85em;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.latex-den {
+  padding: 0 2px;
+  font-size: 0.85em;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.latex-sqrt {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.latex-sqrt-radical {
+  font-size: 1.15em;
+  line-height: 1;
+  font-family: serif;
+}
+
+.latex-sqrt-content {
+  border-top: 1px solid #94a3b8;
+  padding: 0 2px;
+  line-height: 1.1;
+}
 `;
 
 const POPUP_JS_CODE = `// Gemini Web Companion - Popup Controller
@@ -1107,38 +1243,26 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 });`;
 
-// React Formatting & LaTeX math parser
-const renderLatexUnicode = (formula: string) => {
-  let text = formula;
-  const replacements: Record<string, string> = {
-    '\\alpha': 'α', '\\beta': 'β', '\\gamma': 'γ', '\\delta': 'δ', '\\epsilon': 'ε',
-    '\\zeta': 'ζ', '\\eta': 'η', '\\theta': 'θ', '\\iota': 'ι', '\\kappa': 'κ',
-    '\\lambda': 'λ', '\\mu': 'μ', '\\nu': 'ν', '\\xi': 'ξ', '\\pi': 'π',
-    '\\rho': 'ρ', '\\sigma': 'σ', '\\tau': 'τ', '\\upsilon': 'υ', '\\phi': 'φ',
-    '\\chi': 'χ', '\\psi': 'ψ', '\\omega': 'ω',
-    '\\Delta': 'Δ', '\\Gamma': 'Γ', '\\Theta': 'Θ', '\\Lambda': 'Λ', '\\Xi': 'Ξ',
-    '\\Pi': 'Π', '\\Sigma': 'Σ', '\\Phi': 'Φ', '\\Psi': 'Ψ', '\\Omega': 'Ω',
-    '\\infty': '∞', '\\pm': '±', '\\times': '×', '\\div': '÷', 
-    '\\neq': '≠', '\\approx': '≈', '\\leq': '≤', '\\geq': '≥', '\\le': '≤', '\\ge': '≥',
-    '\\to': '→', '\\rightarrow': '→', '\\leftarrow': '←', '\\leftrightarrow': '↔',
-    '\\partial': '∂', '\\nabla': '∇', '\\cdot': '·', '\\bullet': '•',
-    '\\forall': '∀', '\\exists': '∃', '\\in': '∈', '\\notin': '∉', '\\ni': '∋',
-    '\\subset': '⊂', '\\supset': '⊃', '\\subseteq': '⊆', '\\supseteq': '⊇',
-    '\\cup': '∪', '\\cap': '∩', '\\empty': '∅', '\\varnothing': '∅',
-    '\\int': '∫', '\\sum': '∑', '\\prod': '∏', '\\sqrt': '√'
-  };
+// React Formatting & LaTeX math parser using KaTeX
+const RenderLatex = ({ formula, displayMode = false }: { formula: string; displayMode?: boolean }) => {
+  const containerRef = useRef<HTMLSpanElement>(null);
 
-  const sortedKeys = Object.keys(replacements).sort((a, b) => b.length - a.length);
-  for (const key of sortedKeys) {
-    const regex = new RegExp(key.replace(/\\/g, '\\\\'), 'g');
-    text = text.replace(regex, replacements[key]);
-  }
+  useEffect(() => {
+    if (containerRef.current) {
+      try {
+        katex.render(formula, containerRef.current, {
+          displayMode,
+          throwOnError: false,
+          trust: true,
+        });
+      } catch (err) {
+        console.error("KaTeX rendering error:", err);
+        containerRef.current.textContent = formula;
+      }
+    }
+  }, [formula, displayMode]);
 
-  text = text.replace(/\^\{([^\}]+?)\}/g, '^($1)');
-  text = text.replace(/_\{([^\}]+?)\}/g, '_($1)');
-  text = text.replace(/\\frac\{([^\}]+?)\}\{([^\}]+?)\}/g, '($1/$2)');
-  text = text.replace(/\\/g, '');
-  return text;
+  return <span ref={containerRef} className={displayMode ? "block my-1 text-center" : "inline-block align-middle"} />;
 };
 
 const renderInlineStyles = (text: string) => {
@@ -1232,8 +1356,8 @@ const renderInlineStyles = (text: string) => {
         );
       case 'latex':
         return (
-          <span key={idx} className="font-serif italic text-blue-400 px-0.5">
-            {renderLatexUnicode(part.content)}
+          <span key={idx} className="inline-block px-0.5 max-w-full overflow-x-auto align-middle text-blue-400">
+            <RenderLatex formula={part.content} displayMode={false} />
           </span>
         );
       default:
@@ -1296,6 +1420,35 @@ const renderMarkdownTextBlock = (text: string) => {
   });
 };
 
+const CodeBlock = ({ lang, content }: { lang: string; content: string }) => {
+  const [copied, setCopied] = useState(false);
+  
+  const handleCopy = () => {
+    navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-950 overflow-hidden my-2">
+      <div className="flex justify-between items-center bg-slate-800 px-2.5 py-1.5 border-b border-slate-700 text-[9px] font-mono text-slate-400">
+        <span className="uppercase font-semibold tracking-wider text-[8px] text-slate-400">{lang || 'code'}</span>
+        <button 
+          onClick={handleCopy}
+          className={`px-2 py-0.5 rounded transition-all duration-150 font-sans text-[8px] ${
+            copied ? 'bg-emerald-600 text-white font-medium' : 'bg-slate-700 hover:bg-slate-650 text-slate-200'
+          }`}
+        >
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+      <pre className="p-2.5 overflow-x-auto text-[10px] font-mono text-slate-200 leading-normal">
+        <code>{content}</code>
+      </pre>
+    </div>
+  );
+};
+
 const renderFormattedContent = (text: string) => {
   if (!text) return null;
   const blocks: Array<{ type: 'text' | 'latex' | 'code'; content: string; lang?: string }> = [];
@@ -1350,28 +1503,13 @@ const renderFormattedContent = (text: string) => {
       {blocks.map((block, idx) => {
         if (block.type === 'latex') {
           return (
-            <div key={idx} className="flex justify-center items-center my-2.5 p-2.5 rounded-lg border border-slate-700/60 bg-slate-900/60 font-serif italic text-center tracking-wide text-xs text-slate-100">
-              {renderLatexUnicode(block.content)}
+            <div key={idx} className="flex justify-center items-center my-2.5 p-2.5 rounded-lg border border-slate-700/60 bg-slate-900/60 text-center tracking-wide text-xs text-slate-100 overflow-x-auto">
+              <RenderLatex formula={block.content} displayMode={true} />
             </div>
           );
         } else if (block.type === 'code') {
           return (
-            <div key={idx} className="rounded-lg border border-slate-700 bg-slate-950 overflow-hidden my-2">
-              <div className="flex justify-between items-center bg-slate-800 px-2.5 py-1 border-b border-slate-700 text-[9px] font-mono text-slate-400">
-                <span>{block.lang}</span>
-                <button 
-                  onClick={() => {
-                    navigator.clipboard.writeText(block.content);
-                  }}
-                  className="px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-650 text-slate-200 transition-colors"
-                >
-                  Copy
-                </button>
-              </div>
-              <pre className="p-2.5 overflow-x-auto text-[10px] font-mono text-slate-200 leading-normal">
-                <code>{block.content}</code>
-              </pre>
-            </div>
+            <CodeBlock key={idx} lang={block.lang || 'code'} content={block.content} />
           );
         } else {
           return (
@@ -2006,6 +2144,9 @@ export default function App() {
         let localHistory = [...chatHistoryForApi];
 
         while (hasMoreTurns) {
+          if (controller.signal.aborted) {
+            throw new DOMException("Generation stopped by user.", "AbortError");
+          }
           hasMoreTurns = false;
           let activeFunctionCall: any = null;
 
@@ -2057,6 +2198,7 @@ CRITICAL RULES:
 - MULTI-TAB NAVIGATION: You know what each tab is and can switch tabs if needed. Use 'list_tabs' to view all open tabs (IDs, titles, URLs, active status) and use 'switch_tab' to change the active tab when a user asks about another tab, or when you need to gather information from a different open page.
 - NON-DOM INTERACTIVE KEYPRESS RULE: If you are interacting with canvas-based elements, browser games, or non-input interactive areas where WASD or other key actions are required to move or interact (such as playing games, interactive canvases, sliding controls, etc.), use the 'press_key' tool to send raw keyboard presses directly to the page instead of standard 'type_text'.
 - VERIFICATION RULE: After executing an interactive action that modifies page state (such as 'type_text', 'replace_text', 'press_key', 'click_element', or 'click_at_coordinate'), you MUST explicitly verify that your action completed correctly. Do this by calling 'get_page_dom' (or 'get_page_screenshot') immediately after the action to inspect the updated page state and confirm the expected change (e.g., verifying text was input, checking that a modal opened, or confirming that text selection/replacement has occurred). Never just assume an action worked without checking the page's state.
+- ACTION DOUBLE-CHECK: The AI should check if it actually did something correctly in the end. You MUST run a final verification check (fetching updated DOM/screenshot) after typing or clicking to confirm the input is visible, the page updated, or the action fully registered before concluding your response to the user.
 ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n" : ""}- Keep explanations conversational, elegant, and markdown-formatted.`;
 
           if (simProvider === "openai-compatible") {
@@ -2203,6 +2345,20 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     type: "object",
                     properties: { url: { type: "string" } },
                     required: ["url"]
+                  }
+                }
+              },
+              {
+                type: "function",
+                function: {
+                  name: "wait",
+                  description: "Waits/sleeps for a specified duration of milliseconds before proceeding. Use this when waiting for pages to load, search results to refresh, or animations to finish.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      delayMs: { type: "number", description: "The wait duration in milliseconds (e.g. 2000 for 2 seconds)." }
+                    },
+                    required: ["delayMs"]
                   }
                 }
               },
@@ -2529,6 +2685,20 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                       }
                     },
                     {
+                      name: "wait",
+                      description: "Waits/sleeps for a specified duration of milliseconds before proceeding. Use this when waiting for pages to load, search results to refresh, or animations to finish.",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          delayMs: {
+                            type: "NUMBER",
+                            description: "The wait duration in milliseconds (e.g. 2000 for 2 seconds)."
+                          }
+                        },
+                        required: ["delayMs"]
+                      }
+                    },
+                    {
                       name: "search_web",
                       description: "Performs a web search for the specified query and navigates to the search results.",
                       parameters: {
@@ -2740,6 +2910,9 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           }
 
           if (activeFunctionCall) {
+            if (controller.signal.aborted) {
+              throw new DOMException("Generation stopped by user.", "AbortError");
+            }
             hasMoreTurns = true;
 
             // 1. Save model function call to local history (preserving generated thoughts/text and signatures)
@@ -2783,7 +2956,33 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
               if (isGoogleDocs) {
                 try {
-                  // For Google Docs, synthetic paste event is the silver-bullet standard.
+                  target.focus();
+
+                  // Try 1: textInput event
+                  try {
+                    const textEvent = document.createEvent('TextEvent');
+                    (textEvent as any).initTextEvent('textInput', true, true, window, text, 0, 'en-US');
+                    target.dispatchEvent(textEvent);
+                  } catch (e) {}
+
+                  // Try 2: beforeinput + input event
+                  try {
+                    const beforeInputEvent = new InputEvent('beforeinput', {
+                      bubbles: true,
+                      cancelable: true,
+                      inputType: 'insertText',
+                      data: text
+                    });
+                    target.dispatchEvent(beforeInputEvent);
+                  } catch (e) {}
+
+                  // Try 3: Direct value setting
+                  const originalValue = (target as HTMLTextAreaElement).value;
+                  (target as HTMLTextAreaElement).value = text;
+                  target.dispatchEvent(new Event('input', { bubbles: true }));
+                  target.dispatchEvent(new Event('change', { bubbles: true }));
+
+                  // Try 4: Synthetic paste event
                   const dataTransfer = new DataTransfer();
                   dataTransfer.setData('text/plain', text);
                   const pasteEvent = new ClipboardEvent('paste', {
@@ -2792,10 +2991,29 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     clipboardData: dataTransfer
                   });
                   target.dispatchEvent(pasteEvent);
-                  target.dispatchEvent(new Event('input', { bubbles: true }));
+
+                  // Try 5: Character keyboard events
+                  for (let i = 0; i < text.length; i++) {
+                    if (controller.signal.aborted) {
+                      return;
+                    }
+                    const char = text[i];
+                    const keyCode = char.toUpperCase().charCodeAt(0);
+                    const charCode = char.charCodeAt(0);
+
+                    target.dispatchEvent(new KeyboardEvent('keydown', { key: char, code: `Key${char.toUpperCase()}`, keyCode, which: keyCode, bubbles: true, cancelable: true }));
+                    target.dispatchEvent(new KeyboardEvent('keypress', { key: char, keyCode: charCode, which: charCode, bubbles: true, cancelable: true }));
+                    
+                    (target as HTMLTextAreaElement).value = char;
+                    target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: char }));
+                    
+                    target.dispatchEvent(new KeyboardEvent('keyup', { key: char, code: `Key${char.toUpperCase()}`, keyCode, which: keyCode, bubbles: true, cancelable: true }));
+                  }
                   
-                  // Also trigger change event and submit if requested
-                  target.dispatchEvent(new Event('change', { bubbles: true }));
+                  // Reset value
+                  (target as HTMLTextAreaElement).value = "";
+                  target.dispatchEvent(new Event('input', { bubbles: true }));
+
                   if (submit) {
                     const activeEl = document.activeElement || target;
                     activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
@@ -2806,6 +3024,9 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
               // 4. Fallback character-by-character typing for standard/rich editors
               for (let i = 0; i < text.length; i++) {
+                if (controller.signal.aborted) {
+                  return;
+                }
                 const char = text[i];
                 const charCode = char.charCodeAt(0);
                 const keyCode = char.toUpperCase().charCodeAt(0);
@@ -3201,6 +3422,14 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                 url: url,
                 message: `[Simulator] Successfully opened a new tab: ${url} and loaded its context.`
               };
+            } else if (activeFunctionCall.name === "wait") {
+              const delay = Number(activeFunctionCall.args?.delayMs) || 1000;
+              await new Promise((resolve) => setTimeout(resolve, delay));
+              toolOutput = {
+                success: true,
+                delayMs: delay,
+                message: `[Simulator] Successfully waited/slept for ${delay}ms.`
+              };
             } else if (activeFunctionCall.name === "search_web") {
               const query = activeFunctionCall.args?.query || "";
               const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
@@ -3309,6 +3538,8 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               responseNote = `Scrolled page ${activeFunctionCall.args?.direction || "down"}!`;
             } else if (activeFunctionCall.name === "open_tab") {
               responseNote = `Opened new tab: ${activeFunctionCall.args?.url || ""}`;
+            } else if (activeFunctionCall.name === "wait") {
+              responseNote = `Waited for ${activeFunctionCall.args?.delayMs || 1000}ms...`;
             } else if (activeFunctionCall.name === "search_web") {
               responseNote = `Searched web for "${activeFunctionCall.args?.query || ""}"`;
             } else if (activeFunctionCall.name === "list_tabs") {
@@ -3772,14 +4003,40 @@ To install this tool directly into your Chrome browser, check out the **Installa
               </div>
               
               {/* Browser Tabs */}
-              <div className="flex items-center gap-1 flex-1 max-w-sm ml-4 text-left">
-                <div className="bg-slate-900 border-t border-x border-slate-800/80 px-2.5 py-1 rounded-t-md text-[9px] text-slate-300 font-medium truncate flex items-center gap-1.5 shadow-sm">
-                  <span className="text-blue-400">✨</span>
-                  <span>Gemini Web Companion</span>
-                </div>
-                <div className="hidden sm:block text-[9px] text-slate-500 px-2 py-1 hover:text-slate-400 truncate cursor-pointer">
-                  Google AI Studio
-                </div>
+              <div className="flex items-center gap-1 flex-1 max-w-[340px] ml-4 text-left overflow-x-auto no-scrollbar pt-1.5 select-none h-full">
+                {simTabs.map((tab) => {
+                  const isActive = tab.id === activeSimTabId;
+                  return (
+                    <div
+                      key={tab.id}
+                      onClick={() => setActiveSimTabId(tab.id)}
+                      className={`px-2 py-1 text-[8.5px] font-medium truncate rounded-t-md cursor-pointer transition-all flex items-center gap-1.5 max-w-[100px] border-t border-x shrink-0 ${
+                        isActive
+                          ? "bg-slate-900 border-slate-800/80 text-slate-100 shadow-sm"
+                          : "bg-transparent border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-900/40"
+                      }`}
+                      title={tab.title}
+                    >
+                      <span>{tab.icon || "🌐"}</span>
+                      <span className="truncate flex-1">{tab.title}</span>
+                      {simTabs.length > 1 && (
+                        <span 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const remaining = simTabs.filter(t => t.id !== tab.id);
+                            setSimTabs(remaining);
+                            if (isActive) {
+                              setActiveSimTabId(remaining[0].id);
+                            }
+                          }}
+                          className="text-[7.5px] text-slate-500 hover:text-rose-400 font-sans ml-1 select-none font-bold"
+                        >
+                          ✕
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Window Utilities */}

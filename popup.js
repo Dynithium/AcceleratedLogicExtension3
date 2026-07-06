@@ -68,6 +68,28 @@ document.addEventListener("DOMContentLoaded", () => {
   let isGenerating = false;
   let currentAbortController = null;
 
+  // Handle copy buttons inside code blocks (MV3 CSP Compliant)
+  document.addEventListener("click", (e) => {
+    if (e.target && e.target.classList.contains("code-copy-btn")) {
+      const btn = e.target;
+      const pre = btn.nextElementSibling;
+      if (pre) {
+        navigator.clipboard.writeText(pre.textContent || "").then(() => {
+          btn.textContent = "Copied!";
+          btn.style.backgroundColor = "#10b981";
+          btn.style.color = "#ffffff";
+          setTimeout(() => {
+            btn.textContent = "Copy";
+            btn.style.backgroundColor = "";
+            btn.style.color = "";
+          }, 1500);
+        }).catch(err => {
+          console.error("Failed to copy:", err);
+        });
+      }
+    }
+  });
+
   // 1. Initial Load & Hydrate Settings
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
     chrome.storage.local.get([
@@ -951,6 +973,9 @@ document.addEventListener("DOMContentLoaded", () => {
       let currentLoaderDiv = loaderDiv;
 
       while (hasMoreTurns) {
+        if (currentAbortController && currentAbortController.signal.aborted) {
+          throw new DOMException("Generation stopped by user.", "AbortError");
+        }
         hasMoreTurns = false;
         let activeFunctionCall = null;
 
@@ -975,6 +1000,7 @@ CRITICAL RULES:
 - MULTI-TAB NAVIGATION: You know what each tab is and can switch tabs if needed. Use 'list_tabs' to view all open tabs (IDs, titles, URLs, active status) and use 'switch_tab' to change the active tab when a user asks about another tab, or when you need to gather information from a different open page.
 - NON-DOM INTERACTIVE KEYPRESS RULE: If you are interacting with canvas-based elements, browser games, or non-input interactive areas where WASD or other key actions are required to move or interact (such as playing games, interactive canvases, sliding controls, etc.), use the 'press_key' tool to send raw keyboard presses directly to the page instead of standard 'type_text'.
 - VERIFICATION RULE: After executing an interactive action that modifies page state (such as 'type_text', 'replace_text', 'press_key', 'click_element', or 'click_at_coordinate'), you MUST explicitly verify that your action completed correctly. Do this by calling 'get_page_dom' (or 'get_page_screenshot') immediately after the action to inspect the updated page state and confirm the expected change (e.g., verifying text was input, checking that a modal opened, or confirming that text selection/replacement has occurred). Never just assume an action worked without checking the page's state.
+- ACTION DOUBLE-CHECK: The AI should check if it actually did something correctly in the end. You MUST run a final verification check (fetching updated DOM/screenshot) after typing or clicking to confirm the input is visible, the page updated, or the action fully registered before concluding your response to the user.
 ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n" : ""}- Keep explanations conversational, elegant, and markdown-formatted.`;
 
         if (apiProvider === "openai-compatible") {
@@ -1118,6 +1144,20 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     amount: { type: "number", description: "Optional pixel amount to scroll." }
                   },
                   required: ["direction"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "wait",
+                description: "Waits/sleeps for a specified duration of milliseconds before proceeding. Use this when waiting for pages to load, search results to refresh, or animations to finish.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    delayMs: { type: "number", description: "The wait duration in milliseconds (e.g. 2000 for 2 seconds)." }
+                  },
+                  required: ["delayMs"]
                 }
               }
             },
@@ -1474,6 +1514,20 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                   }
                 },
                 {
+                  name: "wait",
+                  description: "Waits/sleeps for a specified duration of milliseconds before proceeding. Use this when waiting for pages to load, search results to refresh, or animations to finish.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      delayMs: {
+                        type: "NUMBER",
+                        description: "The wait duration in milliseconds (e.g. 2000 for 2 seconds)."
+                      }
+                    },
+                    required: ["delayMs"]
+                  }
+                },
+                {
                   name: "search_web",
                   description: "Performs a web search for the specified query and navigates to the search results.",
                   parameters: {
@@ -1777,6 +1831,9 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           });
 
           // 2. Execute the tool
+          if (currentAbortController && currentAbortController.signal.aborted) {
+            throw new DOMException("Generation stopped by user.", "AbortError");
+          }
           const toolResult = await executeTool(activeFunctionCall.name, activeFunctionCall.args);
 
           // Update toolItem log on success/failure
@@ -1801,6 +1858,8 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               note = `Scrolled page ${activeFunctionCall.args?.direction || "down"}.`;
             } else if (activeFunctionCall.name === "open_tab") {
               note = `Opened tab: ${activeFunctionCall.args?.url || ""}`;
+            } else if (activeFunctionCall.name === "wait") {
+              note = `Waited for ${activeFunctionCall.args?.delayMs || 1000}ms.`;
             } else if (activeFunctionCall.name === "search_web") {
               note = `Searched web for "${activeFunctionCall.args?.query || ""}"`;
             } else if (activeFunctionCall.name === "list_tabs") {
@@ -2041,7 +2100,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
         <div class="code-block-container">
           <div class="code-block-header">
             <span class="code-block-lang">${item.lang}</span>
-            <button class="code-copy-btn" onclick="navigator.clipboard.writeText(this.nextElementSibling.innerText); this.innerText='Copied!'; setTimeout(()=>this.innerText='Copy', 1500)">Copy</button>
+            <button class="code-copy-btn">Copy</button>
             <pre class="hidden-code-text" style="display:none">${cleanCode}</pre>
           </div>
           <pre class="code-block-content"><code>${cleanCode}</code></pre>
@@ -2073,8 +2132,10 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
   // Unicode LaTeX math parser
   function renderLatexToHtml(formula) {
+    if (!formula) return "";
     let html = formula;
 
+    // Greek Alphabet and Common Math Symbols
     const replacements = {
       '\\\\alpha': 'α', '\\\\beta': 'β', '\\\\gamma': 'γ', '\\\\delta': 'δ', '\\\\epsilon': 'ε',
       '\\\\zeta': 'ζ', '\\\\eta': 'η', '\\\\theta': 'θ', '\\\\iota': 'ι', '\\\\kappa': 'κ',
@@ -2083,7 +2144,6 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
       '\\\\chi': 'χ', '\\\\psi': 'ψ', '\\\\omega': 'ω',
       '\\\\Delta': 'Δ', '\\\\Gamma': 'Γ', '\\\\Theta': 'Θ', '\\\\Lambda': 'Λ', '\\\\Xi': 'Ξ',
       '\\\\Pi': 'Π', '\\\\Sigma': 'Σ', '\\\\Phi': 'Φ', '\\\\Psi': 'Ψ', '\\\\Omega': 'Ω',
-      
       '\\\\infty': '∞', '\\\\pm': '±', '\\\\times': '×', '\\\\div': '÷', 
       '\\\\neq': '≠', '\\\\approx': '≈', '\\\\leq': '≤', '\\\\geq': '≥', '\\\\le': '≤', '\\\\ge': '≥',
       '\\\\to': '→', '\\\\rightarrow': '→', '\\\\leftarrow': '←', '\\\\leftrightarrow': '↔',
@@ -2091,7 +2151,6 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
       '\\\\forall': '∀', '\\\\exists': '∃', '\\\\in': '∈', '\\\\notin': '∉', '\\\\ni': '∋',
       '\\\\subset': '⊂', '\\\\supset': '⊃', '\\\\subseteq': '⊆', '\\\\supseteq': '⊇',
       '\\\\cup': '∪', '\\\\cap': '∩', '\\\\empty': '∅', '\\\\varnothing': '∅',
-      
       '\\\\int': '∫', '\\\\sum': '∑', '\\\\prod': '∏', '\\\\sqrt': '√'
     };
 
@@ -2101,16 +2160,21 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
       html = html.replace(regex, replacements[key]);
     }
 
-    // Superscripts & Subscripts
-    html = html.replace(/\^\{([^\}]+?)\}/g, '<sup>$1</sup>');
-    html = html.replace(/\^([a-zA-Z0-9\-+\*=]+)/g, '<sup>$1</sup>');
-    html = html.replace(/_\{([^\}]+?)\}/g, '<sub>$1</sub>');
-    html = html.replace(/_([a-zA-Z0-9\-+\*=]+)/g, '<sub>$1</sub>');
+    // Square roots: \sqrt{expression}
+    html = html.replace(/\\sqrt\{([^\}]+?)\}/g, '<span class="latex-sqrt"><span class="latex-sqrt-radical">√</span><span class="latex-sqrt-content">$1</span></span>');
 
     // Fractions: \frac{num}{den}
     html = html.replace(/\\frac\{([^\}]+?)\}\{([^\}]+?)\}/g, '<span class="latex-frac"><span class="latex-num">$1</span><span class="latex-den">$2</span></span>');
 
-    // Clear LaTeX formatting tags
+    // Superscripts & Subscripts (grouped with braces first)
+    html = html.replace(/\^\{([^\}]+?)\}/g, '<sup>$1</sup>');
+    html = html.replace(/_\{([^\}]+?)\}/g, '<sub>$1</sub>');
+
+    // Single character superscripts and subscripts
+    html = html.replace(/\^([a-zA-Z0-9\-+*=])/g, '<sup>$1</sup>');
+    html = html.replace(/_([a-zA-Z0-9\-+*=])/g, '<sub>$1</sub>');
+
+    // Clean remaining tags
     html = html.replace(/\\mathrm\{([^\}]+?)\}/g, '$1');
     html = html.replace(/\\text\{([^\}]+?)\}/g, '$1');
     html = html.replace(/\\left/g, '');
@@ -2278,6 +2342,35 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
         if (isGoogleDocs) {
           try {
+            // Focus the textarea
+            target.focus();
+
+            // Try 1: textInput event (often used by older/rich editors)
+            try {
+              const textEvent = document.createEvent('TextEvent');
+              textEvent.initTextEvent('textInput', true, true, window, text, 0, 'en-US');
+              target.dispatchEvent(textEvent);
+            } catch (e) {}
+
+            // Try 2: beforeinput + input event (modern standard for Google Docs / rich editors)
+            try {
+              const beforeInputEvent = new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'insertText',
+                data: text
+              });
+              target.dispatchEvent(beforeInputEvent);
+            } catch (e) {}
+
+            // Try 3: Direct value setting + input event
+            // Google Docs keeps the textarea empty or with placeholder. Let's set the value and trigger input.
+            const originalValue = target.value;
+            target.value = text;
+            target.dispatchEvent(new Event('input', { bubbles: true }));
+            target.dispatchEvent(new Event('change', { bubbles: true }));
+
+            // Try 4: Synthetic paste event (backup)
             const dataTransfer = new DataTransfer();
             dataTransfer.setData('text/plain', text);
             const pasteEvent = new ClipboardEvent('paste', {
@@ -2286,8 +2379,29 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               clipboardData: dataTransfer
             });
             target.dispatchEvent(pasteEvent);
+
+            // Try 5: If nothing else, dispatch individual character key events
+            for (let i = 0; i < text.length; i++) {
+              if (currentAbortController && currentAbortController.signal.aborted) {
+                return;
+              }
+              const char = text[i];
+              const keyCode = char.toUpperCase().charCodeAt(0);
+              const charCode = char.charCodeAt(0);
+
+              target.dispatchEvent(new KeyboardEvent('keydown', { key: char, code: `Key${char.toUpperCase()}`, keyCode, which: keyCode, bubbles: true, cancelable: true }));
+              target.dispatchEvent(new KeyboardEvent('keypress', { key: char, keyCode: charCode, which: charCode, bubbles: true, cancelable: true }));
+              
+              target.value = char;
+              target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: char }));
+              
+              target.dispatchEvent(new KeyboardEvent('keyup', { key: char, code: `Key${char.toUpperCase()}`, keyCode, which: keyCode, bubbles: true, cancelable: true }));
+            }
+            
+            // Clear the textarea value back to empty so Docs doesn't get confused by stale text in the buffer
+            target.value = "";
             target.dispatchEvent(new Event('input', { bubbles: true }));
-            target.dispatchEvent(new Event('change', { bubbles: true }));
+
             if (submit) {
               const activeEl = document.activeElement || target;
               activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
@@ -2298,6 +2412,9 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
         // 4. Character by character typing fallback
         for (let i = 0; i < text.length; i++) {
+          if (currentAbortController && currentAbortController.signal.aborted) {
+            return;
+          }
           const char = text[i];
           const charCode = char.charCodeAt(0);
           const keyCode = char.toUpperCase().charCodeAt(0);
@@ -2664,6 +2781,15 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             url: url,
             message: `[Simulator] Successfully opened a new tab in background: ${url}`
           });
+        } else if (name === "wait") {
+          const delay = Number(args.delayMs) || 1000;
+          setTimeout(() => {
+            resolve({
+              success: true,
+              delayMs: delay,
+              message: `[Simulator] Successfully waited/slept for ${delay}ms.`
+            });
+          }, delay);
         } else if (name === "search_web") {
           const query = args.query;
           resolve({
@@ -3563,6 +3689,15 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               message: `Successfully opened new tab with URL: ${url}`
             });
           });
+        } else if (name === "wait") {
+          const delay = Number(args.delayMs) || 1000;
+          setTimeout(() => {
+            resolve({
+              success: true,
+              delayMs: delay,
+              message: `Successfully waited/slept for ${delay}ms.`
+            });
+          }, delay);
         } else if (name === "search_web") {
           const query = args.query;
           const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
