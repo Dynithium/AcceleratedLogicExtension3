@@ -1726,7 +1726,9 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             } else if (activeFunctionCall.name === "switch_tab") {
               note = `Switched to tab ID ${activeFunctionCall.args?.tabId || ""}.`;
             } else if (activeFunctionCall.name === "press_key") {
-              note = `Pressed key: "${activeFunctionCall.args?.key || ""}"`;
+              const k = activeFunctionCall.args?.key || "";
+              const duration = activeFunctionCall.args?.holdDuration !== undefined ? Number(activeFunctionCall.args?.holdDuration) : 50;
+              note = `Pressed key: "${k}"${duration > 50 ? ` (held down for ${duration}ms)` : ""}`;
             }
             responseDiv.textContent = note;
           }
@@ -2604,10 +2606,12 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           });
         } else if (name === "press_key") {
           const key = args.key || "";
+          const duration = args.holdDuration !== undefined ? Number(args.holdDuration) : 50;
           resolve({
             success: true,
             key: key,
-            message: `[Simulator Fallback] Successfully pressed key "${key}" in virtual space.`
+            holdDuration: duration,
+            message: `[Simulator Fallback] Successfully pressed key "${key}" and held it down for ${duration}ms in virtual space.`
           });
         } else {
           resolve({ error: "Unknown tool" });

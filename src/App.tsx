@@ -3170,9 +3170,10 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               }
             } else if (activeFunctionCall.name === "press_key") {
               const k = activeFunctionCall.args?.key || "";
+              const duration = activeFunctionCall.args?.holdDuration !== undefined ? Number(activeFunctionCall.args?.holdDuration) : 50;
               toolOutput = {
                 success: true,
-                message: `[Simulator] Successfully pressed key "${k}" on the simulated page.`
+                message: `[Simulator] Successfully pressed key "${k}" and held it down for ${duration}ms on the simulated page.`
               };
             }
 
@@ -3196,7 +3197,9 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               const tabTitle = simTabs.find(t => t.id === Number(activeFunctionCall.args?.tabId))?.title || activeFunctionCall.args?.tabId;
               responseNote = `Switched tab to: ${tabTitle}`;
             } else if (activeFunctionCall.name === "press_key") {
-              responseNote = `Pressed key: "${activeFunctionCall.args?.key || ""}"`;
+              const k = activeFunctionCall.args?.key || "";
+              const duration = activeFunctionCall.args?.holdDuration !== undefined ? Number(activeFunctionCall.args?.holdDuration) : 50;
+              responseNote = `Pressed key: "${k}"${duration > 50 ? ` (held down for ${duration}ms)` : ""}`;
             }
 
             let screenshotUrl = "";
