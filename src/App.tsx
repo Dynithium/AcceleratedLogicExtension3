@@ -34,7 +34,8 @@ const MANIFEST_CODE = `{
     "sidePanel",
     "activeTab",
     "scripting",
-    "storage"
+    "storage",
+    "tabs"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -2020,11 +2021,14 @@ export default function App() {
           const isVisionCapable = simProvider === "gemini" || !!simOpenaiCapabilities?.vision;
           const systemInstructionText = `You are AcceleratedLogic, an advanced browser assistant Chrome Extension.
 You help users analyze web pages, answer questions, and perform research.
-You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, and 'search_web' to perform search queries.
+You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, 'search_web' to perform search queries, 'list_tabs' to list open tabs, and 'switch_tab' to switch between tabs.
 
 CRITICAL RULES:
 - Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.
 - Never output raw base64 data, gibberish strings, or repeating binary characters.
+- PAGE ANALYSIS RULE: When you open a page or perform a search, you MUST NOT just report that the page/search is opened. You MUST immediately proceed to call 'get_page_dom' (or 'get_page_screenshot') to read, analyze, and comprehend its actual content before moving on or concluding, unless the user explicitly said they only wanted to open the page.
+- REAL-TIME SEARCH RULE: If you are unsure of any answer, or need to retrieve current/real-time information, you MUST use 'search_web' to search, then open or switch to relevant result tabs and extract their text using 'get_page_dom' to analyze the findings. Never speculate or give generic answers without verifying.
+- MULTI-TAB NAVIGATION: You know what each tab is and can switch tabs if needed. Use 'list_tabs' to view all open tabs (IDs, titles, URLs, active status) and use 'switch_tab' to change the active tab when a user asks about another tab, or when you need to gather information from a different open page.
 ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n" : ""}- Keep explanations conversational, elegant, and markdown-formatted.`;
 
           if (simProvider === "openai-compatible") {
@@ -2183,6 +2187,31 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     type: "object",
                     properties: { query: { type: "string" } },
                     required: ["query"]
+                  }
+                }
+              },
+              {
+                type: "function",
+                function: {
+                  name: "list_tabs",
+                  description: "Lists all currently open tabs in the browser, showing their unique IDs, titles, URLs, and active status.",
+                  parameters: {
+                    type: "object",
+                    properties: {}
+                  }
+                }
+              },
+              {
+                type: "function",
+                function: {
+                  name: "switch_tab",
+                  description: "Switches the active tab to the one with the specified tab ID.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      tabId: { type: "number", description: "The unique integer ID of the tab to switch to." }
+                    },
+                    required: ["tabId"]
                   }
                 }
               }
@@ -2430,6 +2459,28 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                           }
                         },
                         required: ["query"]
+                      }
+                    },
+                    {
+                      name: "list_tabs",
+                      description: "Lists all currently open tabs in the browser, showing their unique IDs, titles, URLs, and active status.",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {}
+                      }
+                    },
+                    {
+                      name: "switch_tab",
+                      description: "Switches the active browser tab to the one with the specified tab ID.",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          tabId: {
+                            type: "INTEGER",
+                            description: "The unique integer ID of the tab to switch to."
+                          }
+                        },
+                        required: ["tabId"]
                       }
                     }
                   ]
@@ -2755,10 +2806,9 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             };
 
             if (activeFunctionCall.name === "get_page_dom") {
-              const defaultTab = SIM_MOCK_TABS[0];
-              const title = simAttachment?.domContext?.title || defaultTab.title;
-              const url = simAttachment?.domContext?.url || defaultTab.url;
-              const text = simAttachment?.domContext?.text || defaultTab.text;
+              const title = simAttachment?.domContext?.title || activeSimTab.title;
+              const url = simAttachment?.domContext?.url || activeSimTab.url;
+              const text = simAttachment?.domContext?.text || activeSimTab.text;
               toolOutput = {
                 success: true,
                 title,
@@ -3031,6 +3081,46 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                 query: query,
                 message: `[Simulator] Searched the web for "${query}" and loaded the search results tab.`
               };
+            } else if (activeFunctionCall.name === "list_tabs") {
+              toolOutput = {
+                success: true,
+                tabs: simTabs.map(t => ({
+                  id: t.id,
+                  title: t.title,
+                  url: t.url,
+                  active: t.id === activeSimTabId
+                }))
+              };
+            } else if (activeFunctionCall.name === "switch_tab") {
+              const targetTabId = Number(activeFunctionCall.args?.tabId);
+              const targetTab = simTabs.find(t => t.id === targetTabId);
+              if (targetTab) {
+                setActiveSimTabId(targetTabId);
+                setSimAttachment({
+                  name: `Capture: ${targetTab.title}`,
+                  size: "Current Webpage (DOM + HTML)",
+                  type: "image/jpeg",
+                  isImage: true,
+                  base64: targetTab.screenshot,
+                  domContext: {
+                    title: targetTab.title,
+                    url: targetTab.url,
+                    text: targetTab.text
+                  }
+                });
+                toolOutput = {
+                  success: true,
+                  tabId: targetTabId,
+                  title: targetTab.title,
+                  url: targetTab.url,
+                  message: `[Simulator] Successfully switched active tab to: ${targetTab.title}`
+                };
+              } else {
+                toolOutput = {
+                  success: false,
+                  error: `[Simulator] Tab with ID ${targetTabId} not found.`
+                };
+              }
             }
 
             // Append status note to the assistant's text
@@ -3047,6 +3137,11 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               responseNote = `Opened new tab: ${activeFunctionCall.args?.url || ""}`;
             } else if (activeFunctionCall.name === "search_web") {
               responseNote = `Searched web for "${activeFunctionCall.args?.query || ""}"`;
+            } else if (activeFunctionCall.name === "list_tabs") {
+              responseNote = `Listed active tabs!`;
+            } else if (activeFunctionCall.name === "switch_tab") {
+              const tabTitle = simTabs.find(t => t.id === Number(activeFunctionCall.args?.tabId))?.title || activeFunctionCall.args?.tabId;
+              responseNote = `Switched tab to: ${tabTitle}`;
             }
 
             let screenshotUrl = "";

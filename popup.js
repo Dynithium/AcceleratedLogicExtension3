@@ -965,11 +965,14 @@ document.addEventListener("DOMContentLoaded", () => {
         const isVisionCapable = apiProvider === "gemini" || !!openaiCapabilities?.vision;
         const systemInstructionText = `You are AcceleratedLogic, an advanced browser assistant Chrome Extension.
 You help users analyze web pages, answer questions, and perform research.
-You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, and 'search_web' to perform search queries.
+You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, 'search_web' to perform search queries, 'list_tabs' to list open tabs, and 'switch_tab' to switch between tabs.
 
 CRITICAL RULES:
 - Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.
 - Never output raw base64 data, gibberish strings, or repeating binary characters.
+- PAGE ANALYSIS RULE: When you open a page or perform a search, you MUST NOT just report that the page/search is opened. You MUST immediately proceed to call 'get_page_dom' (or 'get_page_screenshot') to read, analyze, and comprehend its actual content before moving on or concluding, unless the user explicitly said they only wanted to open the page.
+- REAL-TIME SEARCH RULE: If you are unsure of any answer, or need to retrieve current/real-time information, you MUST use 'search_web' to search, then open or switch to relevant result tabs and extract their text using 'get_page_dom' to analyze the findings. Never speculate or give generic answers without verifying.
+- MULTI-TAB NAVIGATION: You know what each tab is and can switch tabs if needed. Use 'list_tabs' to view all open tabs (IDs, titles, URLs, active status) and use 'switch_tab' to change the active tab when a user asks about another tab, or when you need to gather information from a different open page.
 ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n" : ""}- Keep explanations conversational, elegant, and markdown-formatted.`;
 
         if (apiProvider === "openai-compatible") {
@@ -1141,6 +1144,31 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     query: { type: "string", description: "The search query string." }
                   },
                   required: ["query"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "list_tabs",
+                description: "Lists all currently open tabs in the browser, showing their unique IDs, titles, URLs, and active status.",
+                parameters: {
+                  type: "object",
+                  properties: {}
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "switch_tab",
+                description: "Switches the active tab to the one with the specified tab ID.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    tabId: { type: "number", description: "The unique integer ID of the tab to switch to." }
+                  },
+                  required: ["tabId"]
                 }
               }
             }
@@ -1402,6 +1430,28 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                       }
                     },
                     required: ["query"]
+                  }
+                },
+                {
+                  name: "list_tabs",
+                  description: "Lists all currently open tabs in the browser, showing their unique IDs, titles, URLs, and active status.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {}
+                  }
+                },
+                {
+                  name: "switch_tab",
+                  description: "Switches the active browser tab to the one with the specified tab ID.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      tabId: {
+                        type: "INTEGER",
+                        description: "The unique integer ID of the tab to switch to."
+                      }
+                    },
+                    required: ["tabId"]
                   }
                 }
               ]
@@ -1756,13 +1806,13 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
     // Match block math: $$ ... $$ or \[ ... \]
     escaped = escaped.replace(/\$\$([\s\S]+?)\$\$/g, (match, formula) => {
-      const id = `__LATEX_BLOCK_${latexBlocks.length}__`;
+      const id = `%%LATEX_BLOCK_${latexBlocks.length}%%`;
       latexBlocks.push(formula.trim());
       return id;
     });
     
     escaped = escaped.replace(/\\\[([\s\S]+?)\\\]/g, (match, formula) => {
-      const id = `__LATEX_BLOCK_${latexBlocks.length}__`;
+      const id = `%%LATEX_BLOCK_${latexBlocks.length}%%`;
       latexBlocks.push(formula.trim());
       return id;
     });
@@ -1772,13 +1822,13 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
       if (/^\d+(\.\d+)?(M|K|B)?$/.test(formula)) {
         return match; 
       }
-      const id = `__LATEX_INLINE_${latexInlines.length}__`;
+      const id = `%%LATEX_INLINE_${latexInlines.length}%%`;
       latexInlines.push(formula.trim());
       return id;
     });
 
     escaped = escaped.replace(/\\\(([\s\S]+?)\\\)/g, (match, formula) => {
-      const id = `__LATEX_INLINE_${latexInlines.length}__`;
+      const id = `%%LATEX_INLINE_${latexInlines.length}%%`;
       latexInlines.push(formula.trim());
       return id;
     });
@@ -1786,7 +1836,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
     // Parse Code Blocks: ```lang\ncode\n```
     const codeBlocks = [];
     escaped = escaped.replace(/```(\w*)[^\n\r]*\r?\n([\s\S]*?)```/g, (match, lang, code) => {
-      const id = `__CODE_BLOCK_${codeBlocks.length}__`;
+      const id = `%%CODE_BLOCK_${codeBlocks.length}%%`;
       codeBlocks.push({ lang: lang || 'code', code: code });
       return id;
     });
@@ -1820,8 +1870,8 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
       line = line.trim();
       if (!line) return "";
       
-      if (line.startsWith("__CODE_BLOCK_") || 
-          line.startsWith("__LATEX_BLOCK_") || 
+      if (line.startsWith("%%CODE_BLOCK_") || 
+          line.startsWith("%%LATEX_BLOCK_") || 
           line.startsWith("<h") || 
           line.startsWith("<blockquote") ||
           line.startsWith("<li")) {
@@ -1842,7 +1892,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
     // Re-insert Code Blocks with copy buttons
     codeBlocks.forEach((item, index) => {
-      const placeholder = `__CODE_BLOCK_${index}__`;
+      const placeholder = `%%CODE_BLOCK_${index}%%`;
       const cleanCode = item.code.trim();
       const codeHtml = `
         <div class="code-block-container">
@@ -1859,7 +1909,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
     // Re-insert LaTeX Blocks with serif equations
     latexBlocks.forEach((formula, index) => {
-      const placeholder = `__LATEX_BLOCK_${index}__`;
+      const placeholder = `%%LATEX_BLOCK_${index}%%`;
       const mathHtml = `
         <div class="latex-block">
           <div class="latex-formula">${renderLatexToHtml(formula)}</div>
@@ -1870,7 +1920,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
     // Re-insert LaTeX Inlines
     latexInlines.forEach((formula, index) => {
-      const placeholder = `__LATEX_INLINE_${index}__`;
+      const placeholder = `%%LATEX_INLINE_${index}%%`;
       const mathHtml = `<span class="latex-inline">${renderLatexToHtml(formula)}</span>`;
       escaped = escaped.replace(placeholder, () => mathHtml);
     });
@@ -2477,6 +2527,21 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             success: true,
             query: query,
             message: `[Simulator] Searched the web for "${query}". Displaying top search results.`
+          });
+        } else if (name === "list_tabs") {
+          resolve({
+            success: true,
+            tabs: [
+              { id: 1, title: "Gemini Web Companion", url: "https://gemini-extension-builder.ai.studio", active: true },
+              { id: 2, title: "Google Search - Gemini API Documentation", url: "https://www.google.com/search?q=gemini+api+documentation", active: false }
+            ]
+          });
+        } else if (name === "switch_tab") {
+          const targetId = Number(args.tabId);
+          resolve({
+            success: true,
+            tabId: targetId,
+            message: `[Simulator Fallback] Successfully switched active tab to tab ID ${targetId}.`
           });
         } else {
           resolve({ error: "Unknown tool" });
@@ -3276,6 +3341,37 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               query: query,
               message: `Successfully performed web search for "${query}" and opened search tab.`
             });
+          });
+        } else if (name === "list_tabs") {
+          chrome.tabs.query({ currentWindow: true }, (tabsList) => {
+            if (chrome.runtime.lastError) {
+              resolve({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+              resolve({
+                success: true,
+                tabs: (tabsList || []).map(t => ({
+                  id: t.id,
+                  title: t.title,
+                  url: t.url,
+                  active: t.active
+                }))
+              });
+            }
+          });
+        } else if (name === "switch_tab") {
+          const targetId = Number(args.tabId);
+          chrome.tabs.update(targetId, { active: true }, (tab) => {
+            if (chrome.runtime.lastError) {
+              resolve({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+              resolve({
+                success: true,
+                tabId: targetId,
+                title: tab ? tab.title : "",
+                url: tab ? tab.url : "",
+                message: `Successfully switched active tab to: ${tab ? tab.title : targetId}`
+              });
+            }
           });
         } else {
           resolve({ error: "Unknown tool" });
