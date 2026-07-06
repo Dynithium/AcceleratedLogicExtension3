@@ -956,6 +956,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function parseThinkingAndContent(text) {
+    text = preprocessThinkingTags(text);
     let thinking = "";
     let content = text;
     const thinkingStartTag = "<thinking>";
@@ -1412,8 +1413,33 @@ async function fetchWithBackoff(url: string, options: any, maxAttempts = 3, init
   }
 }
 
+function preprocessThinkingTags(text: string): string {
+  if (!text) return text;
+  const trimmed = text.trim();
+  if (trimmed.startsWith("<thinking>")) return text;
+  
+  const match = text.match(/^\s*(Thought|thought|Thinking|thinking)\s*(:\s*|\n+\s*)/i);
+  if (match) {
+    const startIndex = match.index! + match[0].length;
+    const rest = text.substring(startIndex);
+    
+    const transitionRegex = /\n\n(?=[a-zA-Z]|\*\*|#|-|\*|\[)/;
+    const transitionMatch = rest.match(transitionRegex);
+    if (transitionMatch) {
+      const transitionIndex = transitionMatch.index!;
+      const thoughtContent = rest.substring(0, transitionIndex);
+      const restContent = rest.substring(transitionIndex);
+      return `<thinking>${thoughtContent}</thinking>${restContent}`;
+    } else {
+      return `<thinking>${rest}`;
+    }
+  }
+  return text;
+}
+
 // Parses thinking blocks out of the text content inside React
 function parseThinkingAndContent(text: string) {
+  text = preprocessThinkingTags(text);
   const thinkingParts: string[] = [];
   let content = "";
   
@@ -2235,6 +2261,39 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     required: ["key"]
                   }
                 }
+              },
+              {
+                type: "function",
+                function: {
+                  name: "select_text",
+                  description: "Selects/highlights text in the webpage. For input/textarea, focuses and sets selection range. For rich text editors or standard text, uses selection APIs.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      selector: { type: "string", description: "Optional CSS selector of the element. If omitted, targets body." },
+                      searchText: { type: "string", description: "The text string to search for and select/highlight." },
+                      startIndex: { type: "number", description: "Optional character start index for input/textarea selection." },
+                      endIndex: { type: "number", description: "Optional character end index for input/textarea selection." }
+                    },
+                    required: ["searchText"]
+                  }
+                }
+              },
+              {
+                type: "function",
+                function: {
+                  name: "replace_text",
+                  description: "Replaces text in the webpage. If searchText is provided, finds and replaces it. If searchText is omitted, replaces the currently selected/highlighted text. Uses standard rich-text editing APIs to preserve document state and history.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      selector: { type: "string", description: "Optional CSS selector of the element. If omitted, targets current focus." },
+                      searchText: { type: "string", description: "Optional text string to find and replace. If omitted, replaces active selection." },
+                      replaceText: { type: "string", description: "The text to insert/replace with." }
+                    },
+                    required: ["replaceText"]
+                  }
+                }
               }
             ];
 
@@ -2528,6 +2587,54 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                           metaKey: { type: "BOOLEAN", description: "Optional. Meta/Command key held down." }
                         },
                         required: ["key"]
+                      }
+                    },
+                    {
+                      name: "select_text",
+                      description: "Selects/highlights text in the webpage. For input/textarea, focuses and sets selection range. For rich text editors or standard text, uses selection APIs.",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          selector: {
+                            type: "STRING",
+                            description: "Optional CSS selector of the element. If omitted, targets body."
+                          },
+                          searchText: {
+                            type: "STRING",
+                            description: "The text string to search for and select/highlight."
+                          },
+                          startIndex: {
+                            type: "INTEGER",
+                            description: "Optional character start index for input/textarea selection."
+                          },
+                          endIndex: {
+                            type: "INTEGER",
+                            description: "Optional character end index for input/textarea selection."
+                          }
+                        },
+                        required: ["searchText"]
+                      }
+                    },
+                    {
+                      name: "replace_text",
+                      description: "Replaces text in the webpage. If searchText is provided, finds and replaces it. If searchText is omitted, replaces the currently selected/highlighted text. Uses standard rich-text editing APIs to preserve document state and history.",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          selector: {
+                            type: "STRING",
+                            description: "Optional CSS selector of the element. If omitted, targets current focus."
+                          },
+                          searchText: {
+                            type: "STRING",
+                            description: "Optional text string to find and replace. If omitted, replaces active selection."
+                          },
+                          replaceText: {
+                            type: "STRING",
+                            description: "The text to insert/replace with."
+                          }
+                        },
+                        required: ["replaceText"]
                       }
                     }
                   ]
@@ -3175,6 +3282,18 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                 success: true,
                 message: `[Simulator] Successfully pressed key "${k}" and held it down for ${duration}ms on the simulated page.`
               };
+            } else if (activeFunctionCall.name === "select_text") {
+              const txt = activeFunctionCall.args?.searchText || "";
+              toolOutput = {
+                success: true,
+                message: `[Simulator] Successfully selected and highlighted text "${txt}" on the simulated page.`
+              };
+            } else if (activeFunctionCall.name === "replace_text") {
+              const rep = activeFunctionCall.args?.replaceText || "";
+              toolOutput = {
+                success: true,
+                message: `[Simulator] Successfully replaced text with "${rep}" on the simulated page.`
+              };
             }
 
             // Append status note to the assistant's text
@@ -3200,6 +3319,10 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               const k = activeFunctionCall.args?.key || "";
               const duration = activeFunctionCall.args?.holdDuration !== undefined ? Number(activeFunctionCall.args?.holdDuration) : 50;
               responseNote = `Pressed key: "${k}"${duration > 50 ? ` (held down for ${duration}ms)` : ""}`;
+            } else if (activeFunctionCall.name === "select_text") {
+              responseNote = `Selected/highlighted text: "${activeFunctionCall.args?.searchText || ""}"`;
+            } else if (activeFunctionCall.name === "replace_text") {
+              responseNote = `Replaced text with: "${activeFunctionCall.args?.replaceText || ""}"`;
             }
 
             let screenshotUrl = "";

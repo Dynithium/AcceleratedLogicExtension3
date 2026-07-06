@@ -1192,6 +1192,39 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                   required: ["key"]
                 }
               }
+            },
+            {
+              type: "function",
+              function: {
+                name: "select_text",
+                description: "Selects/highlights text in the webpage. For input/textarea, focuses and sets selection range. For rich text editors or standard text, uses selection APIs.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    selector: { type: "string", description: "Optional CSS selector of the element. If omitted, targets body." },
+                    searchText: { type: "string", description: "The text string to search for and select/highlight." },
+                    startIndex: { type: "number", description: "Optional character start index for input/textarea selection." },
+                    endIndex: { type: "number", description: "Optional character end index for input/textarea selection." }
+                  },
+                  required: ["searchText"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "replace_text",
+                description: "Replaces text in the webpage. If searchText is provided, finds and replaces it. If searchText is omitted, replaces the currently selected/highlighted text. Uses standard rich-text editing APIs to preserve document state and history.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    selector: { type: "string", description: "Optional CSS selector of the element. If omitted, targets current focus." },
+                    searchText: { type: "string", description: "Optional text string to find and replace. If omitted, replaces active selection." },
+                    replaceText: { type: "string", description: "The text to insert/replace with." }
+                  },
+                  required: ["replaceText"]
+                }
+              }
             }
           ];
 
@@ -1499,6 +1532,54 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                       metaKey: { type: "BOOLEAN", description: "Optional. Meta/Command key held down." }
                     },
                     required: ["key"]
+                  }
+                },
+                {
+                  name: "select_text",
+                  description: "Selects/highlights text in the webpage. For input/textarea, focuses and sets selection range. For rich text editors or standard text, uses selection APIs.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      selector: {
+                        type: "STRING",
+                        description: "Optional CSS selector of the element. If omitted, targets body."
+                      },
+                      searchText: {
+                        type: "STRING",
+                        description: "The text string to search for and select/highlight."
+                      },
+                      startIndex: {
+                        type: "INTEGER",
+                        description: "Optional character start index for input/textarea selection."
+                      },
+                      endIndex: {
+                        type: "INTEGER",
+                        description: "Optional character end index for input/textarea selection."
+                      }
+                    },
+                    required: ["searchText"]
+                  }
+                },
+                {
+                  name: "replace_text",
+                  description: "Replaces text in the webpage. If searchText is provided, finds and replaces it. If searchText is omitted, replaces the currently selected/highlighted text. Uses standard rich-text editing APIs to preserve document state and history.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      selector: {
+                        type: "STRING",
+                        description: "Optional CSS selector of the element. If omitted, targets current focus."
+                      },
+                      searchText: {
+                        type: "STRING",
+                        description: "Optional text string to find and replace. If omitted, replaces active selection."
+                      },
+                      replaceText: {
+                        type: "STRING",
+                        description: "The text to insert/replace with."
+                      }
+                    },
+                    required: ["replaceText"]
                   }
                 }
               ]
@@ -2613,6 +2694,20 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             holdDuration: duration,
             message: `[Simulator Fallback] Successfully pressed key "${key}" and held it down for ${duration}ms in virtual space.`
           });
+        } else if (name === "select_text") {
+          const txt = args.searchText || "";
+          resolve({
+            success: true,
+            searchText: txt,
+            message: `[Simulator Fallback] Successfully selected and highlighted text "${txt}" in virtual space.`
+          });
+        } else if (name === "replace_text") {
+          const rep = args.replaceText || "";
+          resolve({
+            success: true,
+            replaceText: rep,
+            message: `[Simulator Fallback] Successfully replaced selected text with "${rep}" in virtual space.`
+          });
         } else {
           resolve({ error: "Unknown tool" });
         }
@@ -3472,17 +3567,14 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               let keyCodeNum = 0;
               const lowerKey = keyVal.toLowerCase();
 
-              if (lowerKey === 'w') { codeName = 'KeyW'; keyCodeNum = 87; }
-              else if (lowerKey === 'a') { codeName = 'KeyA'; keyCodeNum = 65; }
-              else if (lowerKey === 's') { codeName = 'KeyS'; keyCodeNum = 83; }
-              else if (lowerKey === 'd') { codeName = 'KeyD'; keyCodeNum = 68; }
-              else if (lowerKey === 'e') { codeName = 'KeyE'; keyCodeNum = 69; }
-              else if (lowerKey === 'q') { codeName = 'KeyQ'; keyCodeNum = 81; }
-              else if (lowerKey === 'r') { codeName = 'KeyR'; keyCodeNum = 82; }
-              else if (lowerKey === 'f') { codeName = 'KeyF'; keyCodeNum = 70; }
-              else if (lowerKey === 'x') { codeName = 'KeyX'; keyCodeNum = 88; }
-              else if (lowerKey === 'z') { codeName = 'KeyZ'; keyCodeNum = 90; }
-              else if (keyVal === 'ArrowUp') { codeName = 'ArrowUp'; keyCodeNum = 38; }
+              if (keyVal.length === 1 && keyVal.match(/[a-zA-Z]/)) {
+                const upper = keyVal.toUpperCase();
+                codeName = 'Key' + upper;
+                keyCodeNum = upper.charCodeAt(0);
+              } else if (keyVal.length === 1 && keyVal.match(/[0-9]/)) {
+                codeName = 'Digit' + keyVal;
+                keyCodeNum = keyVal.charCodeAt(0);
+              } else if (keyVal === 'ArrowUp') { codeName = 'ArrowUp'; keyCodeNum = 38; }
               else if (keyVal === 'ArrowDown') { codeName = 'ArrowDown'; keyCodeNum = 40; }
               else if (keyVal === 'ArrowLeft') { codeName = 'ArrowLeft'; keyCodeNum = 37; }
               else if (keyVal === 'ArrowRight') { codeName = 'ArrowRight'; keyCodeNum = 39; }
@@ -3535,6 +3627,237 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               resolve({ success: false, error: "Script injection failed for key press simulation." });
             }
           });
+        } else if (name === "select_text") {
+          const searchText = args.searchText || "";
+          const selector = args.selector || "";
+          const startIndex = args.startIndex !== undefined ? Number(args.startIndex) : null;
+          const endIndex = args.endIndex !== undefined ? Number(args.endIndex) : null;
+
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            args: [searchText, selector, startIndex, endIndex],
+            func: async (searchTextVal, sel, startIdx, endIdx) => {
+              let target = document.body;
+              if (sel) {
+                try {
+                  const found = document.querySelector(sel);
+                  if (found) target = found;
+                } catch (e) {}
+              }
+
+              if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+                target.focus();
+                const val = target.value || "";
+                let s = 0;
+                let e = val.length;
+
+                if (startIdx !== null && endIdx !== null) {
+                  s = startIdx;
+                  e = endIdx;
+                } else if (searchTextVal) {
+                  const idx = val.toLowerCase().indexOf(searchTextVal.toLowerCase());
+                  if (idx !== -1) {
+                    s = idx;
+                    e = idx + searchTextVal.length;
+                  }
+                }
+
+                target.setSelectionRange(s, e);
+                return {
+                  success: true,
+                  tagName: target.tagName,
+                  message: `Successfully selected text range [${s}, ${e}] in input/textarea.`
+                };
+              }
+
+              target.focus();
+              const selection = window.getSelection();
+              if (!selection) {
+                return { success: false, error: "Selection API not available in this window context." };
+              }
+              selection.removeAllRanges();
+
+              if (searchTextVal) {
+                const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, null);
+                let textNode = null;
+                let offset = -1;
+
+                while (walker.nextNode()) {
+                  const node = walker.currentNode;
+                  const idx = (node.nodeValue || "").toLowerCase().indexOf(searchTextVal.toLowerCase());
+                  if (idx !== -1) {
+                    textNode = node;
+                    offset = idx;
+                    break;
+                  }
+                }
+
+                if (textNode) {
+                  const range = document.createRange();
+                  range.setStart(textNode, offset);
+                  range.setEnd(textNode, offset + searchTextVal.length);
+                  selection.addRange(range);
+
+                  try {
+                    textNode.parentElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  } catch (err) {}
+
+                  return {
+                    success: true,
+                    message: `Successfully highlighted and selected text "${searchTextVal}".`
+                  };
+                } else {
+                  if (typeof window.find === 'function') {
+                    const found = window.find(searchTextVal, false, false, true, false, true, false);
+                    if (found) {
+                      return {
+                        success: true,
+                        message: `Successfully selected text "${searchTextVal}" via window.find.`
+                      };
+                    }
+                  }
+                  return {
+                    success: false,
+                    error: `Could not find text "${searchTextVal}" inside the page.`
+                  };
+                }
+              } else {
+                const range = document.createRange();
+                range.selectNodeContents(target);
+                selection.addRange(range);
+                return {
+                  success: true,
+                  message: `Successfully selected all contents of element <${target.tagName.toLowerCase()}>.`
+                };
+              }
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve(results[0].result);
+            } else {
+              resolve({ success: false, error: "Script injection failed for select_text." });
+            }
+          });
+        } else if (name === "replace_text") {
+          const searchText = args.searchText || "";
+          const replaceText = args.replaceText || "";
+          const selector = args.selector || "";
+
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            args: [searchText, replaceText, selector],
+            func: async (searchVal, replaceVal, sel) => {
+              let target = document.activeElement || document.body;
+              if (sel) {
+                try {
+                  const found = document.querySelector(sel);
+                  if (found) {
+                    target = found;
+                    target.focus();
+                  }
+                } catch (e) {}
+              }
+
+              if (searchVal) {
+                if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+                  const val = target.value || "";
+                  const idx = val.toLowerCase().indexOf(searchVal.toLowerCase());
+                  if (idx !== -1) {
+                    target.setSelectionRange(idx, idx + searchVal.length);
+                  } else {
+                    return { success: false, error: `Could not find text "${searchVal}" inside input/textarea.` };
+                  }
+                } else {
+                  const selection = window.getSelection();
+                  if (selection) {
+                    selection.removeAllRanges();
+                    const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, null);
+                    let textNode = null;
+                    let offset = -1;
+
+                    while (walker.nextNode()) {
+                      const node = walker.currentNode;
+                      const idx = (node.nodeValue || "").toLowerCase().indexOf(searchVal.toLowerCase());
+                      if (idx !== -1) {
+                        textNode = node;
+                        offset = idx;
+                        break;
+                      }
+                    }
+
+                    if (textNode) {
+                      const range = document.createRange();
+                      range.setStart(textNode, offset);
+                      range.setEnd(textNode, offset + searchVal.length);
+                      selection.addRange(range);
+                    } else if (typeof window.find === 'function') {
+                      window.find(searchVal, false, false, true, false, true, false);
+                    } else {
+                      return { success: false, error: `Could not find text "${searchVal}" on page.` };
+                    }
+                  }
+                }
+              }
+
+              if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+                const start = target.selectionStart || 0;
+                const end = target.selectionEnd || 0;
+                const val = target.value;
+                
+                target.value = val.substring(0, start) + replaceVal + val.substring(end);
+                target.selectionStart = target.selectionEnd = start + replaceVal.length;
+                
+                target.dispatchEvent(new Event('input', { bubbles: true }));
+                target.dispatchEvent(new Event('change', { bubbles: true }));
+
+                return {
+                  success: true,
+                  message: `Successfully replaced text with "${replaceVal}" in input/textarea.`
+                };
+              }
+
+              try {
+                const selection = window.getSelection();
+                if (selection && selection.rangeCount > 0) {
+                  const executed = document.execCommand('insertText', false, replaceVal);
+                  if (executed) {
+                    return {
+                      success: true,
+                      message: `Successfully replaced text selection with "${replaceVal}" using document.execCommand.`
+                    };
+                  }
+                }
+              } catch (e) {}
+
+              if (target.isContentEditable || target.getAttribute('contenteditable') === 'true') {
+                const selection = window.getSelection();
+                if (selection && selection.rangeCount > 0) {
+                  const range = selection.getRangeAt(0);
+                  range.deleteContents();
+                  const textNode = document.createTextNode(replaceVal);
+                  range.insertNode(textNode);
+                  range.collapse(false);
+                  
+                  target.dispatchEvent(new Event('input', { bubbles: true }));
+                  return {
+                    success: true,
+                    message: `Successfully replaced selection with "${replaceVal}" via manual Range DOM manipulation.`
+                  };
+                }
+              }
+
+              return {
+                success: false,
+                error: "No active selection found and could not perform replacement. Make sure the text is selected/highlighted first."
+              };
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve(results[0].result);
+            } else {
+              resolve({ success: false, error: "Script injection failed for replace_text." });
+            }
+          });
         } else {
           resolve({ error: "Unknown tool" });
         }
@@ -3542,8 +3865,33 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
     });
   }
 
+  function preprocessThinkingTags(text) {
+    if (!text) return text;
+    const trimmed = text.trim();
+    if (trimmed.startsWith("<thinking>")) return text;
+    
+    const match = text.match(/^\s*(Thought|thought|Thinking|thinking)\s*(:\s*|\n+\s*)/i);
+    if (match) {
+      const startIndex = match.index + match[0].length;
+      const rest = text.substring(startIndex);
+      
+      const transitionRegex = /\n\n(?=[a-zA-Z]|\*\*|#|-|\*|\[)/;
+      const transitionMatch = rest.match(transitionRegex);
+      if (transitionMatch) {
+        const transitionIndex = transitionMatch.index;
+        const thoughtContent = rest.substring(0, transitionIndex);
+        const restContent = rest.substring(transitionIndex);
+        return `<thinking>${thoughtContent}</thinking>${restContent}`;
+      } else {
+        return `<thinking>${rest}`;
+      }
+    }
+    return text;
+  }
+
   // Parses thinking blocks out of the text content
   function parseThinkingAndContent(text) {
+    text = preprocessThinkingTags(text);
     const thinkingParts = [];
     let content = "";
     
