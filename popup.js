@@ -2596,8 +2596,8 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             }
           });
         } else if (name === "click_at_coordinate") {
-          const x = args.x;
-          const y = args.y;
+          const x = args.x !== undefined ? args.x : null;
+          const y = args.y !== undefined ? args.y : null;
           const coordType = args.coordinateType || "percentage";
           const typeText = args.typeText || "";
           const submit = !!args.submitAfter;
@@ -3131,7 +3131,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           });
         } else if (name === "scroll_page") {
           const dir = args.direction || "down";
-          const amt = args.amount;
+          const amt = args.amount !== undefined ? args.amount : null;
           chrome.scripting.executeScript({
             target: { tabId: activeTab.id },
             args: [dir, amt],
