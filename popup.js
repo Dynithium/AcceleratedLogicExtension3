@@ -2726,10 +2726,27 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           chrome.scripting.executeScript({
             target: { tabId: activeTab.id },
             func: () => {
+              const getFrameText = (doc) => {
+                let frameText = doc.body ? doc.body.innerText : "";
+                const iframes = doc.querySelectorAll('iframe, frame');
+                for (const iframe of iframes) {
+                  try {
+                    const subDoc = iframe.contentDocument || iframe.contentWindow.document;
+                    if (subDoc) {
+                      frameText += "\n--- IFRAME: " + (iframe.id || iframe.className || "untitled") + " ---\n" + getFrameText(subDoc);
+                    }
+                  } catch (e) {
+                    // cross-origin skip
+                  }
+                }
+                return frameText;
+              };
+              
+              const text = getFrameText(document);
               return {
                 title: document.title,
                 url: window.location.href,
-                text: document.body ? document.body.innerText.substring(0, 50000) : ""
+                text: text.substring(0, 50000)
               };
             }
           }, (results) => {
@@ -2776,18 +2793,29 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             target: { tabId: activeTab.id },
             args: [sel, txt],
             func: (selector, textContext) => {
-              let elements = [];
-              if (selector) {
-                try {
-                  elements = Array.from(document.querySelectorAll(selector));
-                } catch (e) {
-                  return { success: false, error: "Invalid selector: " + selector };
+              const findElements = (doc) => {
+                let foundElements = [];
+                if (selector) {
+                  try {
+                    foundElements = Array.from(doc.querySelectorAll(selector));
+                  } catch (e) {}
+                } else if (textContext) {
+                  foundElements = Array.from(doc.querySelectorAll("button, a, input, [role='button'], span, p, div"));
                 }
-              } else if (textContext) {
-                elements = Array.from(document.querySelectorAll("button, a, input, [role='button'], span, p, div"));
-              } else {
-                return { success: false, error: "No selector or textContext specified." };
-              }
+                
+                const iframes = doc.querySelectorAll('iframe, frame');
+                for (const iframe of iframes) {
+                  try {
+                    const subDoc = iframe.contentDocument || iframe.contentWindow.document;
+                    if (subDoc) {
+                      foundElements = foundElements.concat(findElements(subDoc));
+                    }
+                  } catch (e) {}
+                }
+                return foundElements;
+              };
+
+              let elements = findElements(document);
 
               if (textContext) {
                 const lowerText = textContext.toLowerCase().trim();
@@ -3121,9 +3149,44 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             target: { tabId: activeTab.id },
             args: [sel, txt, submit],
             func: async (selector, text, submitAfter) => {
+              const findElementInAllFrames = (selector, doc = document) => {
+                try {
+                  const found = doc.querySelector(selector);
+                  if (found) return found;
+                } catch (e) {}
+                const iframes = doc.querySelectorAll('iframe, frame');
+                for (const iframe of iframes) {
+                  try {
+                    const subDoc = iframe.contentDocument || iframe.contentWindow.document;
+                    if (subDoc) {
+                      const found = findElementInAllFrames(selector, subDoc);
+                      if (found) return found;
+                    }
+                  } catch (e) {}
+                }
+                return null;
+              };
+
+              const getDeepActiveElement = (doc = document) => {
+                let el = doc.activeElement;
+                while (el && (el.tagName === 'IFRAME' || el.tagName === 'FRAME')) {
+                  try {
+                    const subDoc = el.contentDocument || el.contentWindow.document;
+                    if (subDoc && subDoc.activeElement && subDoc.activeElement !== el) {
+                      el = subDoc.activeElement;
+                    } else {
+                      break;
+                    }
+                  } catch (e) {
+                    break;
+                  }
+                }
+                return el;
+              };
+
               let target;
               try {
-                target = document.querySelector(selector);
+                target = findElementInAllFrames(selector, document);
               } catch (e) {
                 return { success: false, error: "Invalid selector: " + selector };
               }
@@ -3140,16 +3203,17 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
                 // 2. Determine actual input/editing target
                 let target = initialTarget;
-                if (document.activeElement && (
-                  document.activeElement.tagName === "INPUT" ||
-                  document.activeElement.tagName === "TEXTAREA" ||
-                  document.activeElement.isContentEditable ||
-                  document.activeElement.getAttribute('role') === 'textbox' ||
-                  document.activeElement.classList.contains('docs-textarea')
+                const activeEl = getDeepActiveElement(document);
+                if (activeEl && (
+                  activeEl.tagName === "INPUT" ||
+                  activeEl.tagName === "TEXTAREA" ||
+                  activeEl.isContentEditable ||
+                  activeEl.getAttribute('role') === 'textbox' ||
+                  activeEl.classList.contains('docs-textarea')
                 )) {
-                  target = document.activeElement;
+                  target = activeEl;
                 } else {
-                  const docTextarea = document.querySelector('.docs-textarea');
+                  const docTextarea = findElementInAllFrames('.docs-textarea', document);
                   if (docTextarea) {
                     target = docTextarea;
                   }
@@ -3157,10 +3221,12 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
                 target.focus();
 
+                const win = target.ownerDocument ? (target.ownerDocument.defaultView || window) : window;
+
                 // 3. Special handling for Google Docs (.docs-textarea)
                 const isGoogleDocs = target.classList.contains('docs-textarea') || 
-                                     window.location.hostname.includes('docs.google.com') ||
-                                     document.querySelector('.docs-textarea') !== null;
+                                     win.location.hostname.includes('docs.google.com') ||
+                                     findElementInAllFrames('.docs-textarea', document) !== null;
 
                 if (isGoogleDocs) {
                   try {
@@ -3175,7 +3241,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     target.dispatchEvent(new Event('input', { bubbles: true }));
                     target.dispatchEvent(new Event('change', { bubbles: true }));
                     if (submit) {
-                      const activeEl = document.activeElement || target;
+                      const activeEl = getDeepActiveElement(document) || target;
                       activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
                     }
                     return;
@@ -3240,29 +3306,29 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                         
                         let textEventHandled = false;
                         try {
-                          const textEvent = document.createEvent('TextEvent');
-                          textEvent.initTextEvent('textInput', true, true, window, char, 0, 'en-US');
+                          const textEvent = win.document.createEvent('TextEvent');
+                          textEvent.initTextEvent('textInput', true, true, win, char, 0, 'en-US');
                           textEventHandled = targetEditable.dispatchEvent(textEvent);
                         } catch (e) {}
 
                         if (!textEventHandled) {
                           try {
-                            const selection = window.getSelection();
+                            const selection = win.getSelection();
                             if (selection && selection.rangeCount > 0) {
                               const range = selection.getRangeAt(0);
                               range.deleteContents();
-                              const textNode = document.createTextNode(char);
+                              const textNode = win.document.createTextNode(char);
                               range.insertNode(textNode);
                               range.setStartAfter(textNode);
                               range.setEndAfter(textNode);
                               selection.removeAllRanges();
                               selection.addRange(range);
                             } else {
-                              document.execCommand('insertText', false, char);
+                              win.document.execCommand('insertText', false, char);
                             }
                           } catch (err) {
                             try {
-                              document.execCommand('insertText', false, char);
+                              win.document.execCommand('insertText', false, char);
                             } catch (e2) {
                               targetEditable.innerText += char;
                             }
@@ -3270,13 +3336,13 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                         }
                       } else {
                         try {
-                          const textEvent = document.createEvent('TextEvent');
-                          textEvent.initTextEvent('textInput', true, true, window, char, 0, 'en-US');
+                          const textEvent = win.document.createEvent('TextEvent');
+                          textEvent.initTextEvent('textInput', true, true, win, char, 0, 'en-US');
                           target.dispatchEvent(textEvent);
                         } catch (e) {}
 
                         try {
-                          document.execCommand('insertText', false, char);
+                          win.document.execCommand('insertText', false, char);
                         } catch (err) {
                           target.innerText += char;
                         }
@@ -3329,7 +3395,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     if (form.requestSubmit) form.requestSubmit();
                     else form.submit();
                   } else {
-                    const activeEl = document.activeElement || target;
+                    const activeEl = getDeepActiveElement(document) || target;
                     activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
                   }
                 }
@@ -3552,15 +3618,48 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             target: { tabId: activeTab.id },
             args: [key, selector, holdDuration, ctrlKey, altKey, shiftKey, metaKey],
             func: async (keyVal, sel, duration, ctrl, alt, shift, meta) => {
-              let target = document.activeElement || document.body;
-              if (sel) {
+              const findElementInAllFrames = (selector, doc = document) => {
                 try {
-                  const found = document.querySelector(sel);
-                  if (found) {
-                    target = found;
-                    target.focus();
-                  }
+                  const found = doc.querySelector(selector);
+                  if (found) return found;
                 } catch (e) {}
+                const iframes = doc.querySelectorAll('iframe, frame');
+                for (const iframe of iframes) {
+                  try {
+                    const subDoc = iframe.contentDocument || iframe.contentWindow.document;
+                    if (subDoc) {
+                      const found = findElementInAllFrames(selector, subDoc);
+                      if (found) return found;
+                    }
+                  } catch (e) {}
+                }
+                return null;
+              };
+
+              const getDeepActiveElement = (doc = document) => {
+                let el = doc.activeElement;
+                while (el && (el.tagName === 'IFRAME' || el.tagName === 'FRAME')) {
+                  try {
+                    const subDoc = el.contentDocument || el.contentWindow.document;
+                    if (subDoc && subDoc.activeElement && subDoc.activeElement !== el) {
+                      el = subDoc.activeElement;
+                    } else {
+                      break;
+                    }
+                  } catch (e) {
+                    break;
+                  }
+                }
+                return el;
+              };
+
+              let target = getDeepActiveElement(document) || document.body;
+              if (sel) {
+                const found = findElementInAllFrames(sel, document);
+                if (found) {
+                  target = found;
+                  target.focus();
+                }
               }
 
               let keyName = keyVal;
@@ -3638,13 +3737,48 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             target: { tabId: activeTab.id },
             args: [searchText, selector, startIndex, endIndex],
             func: async (searchTextVal, sel, startIdx, endIdx) => {
-              let target = document.body;
-              if (sel) {
+              const findElementInAllFrames = (selector, doc = document) => {
                 try {
-                  const found = document.querySelector(sel);
-                  if (found) target = found;
+                  const found = doc.querySelector(selector);
+                  if (found) return found;
                 } catch (e) {}
+                const iframes = doc.querySelectorAll('iframe, frame');
+                for (const iframe of iframes) {
+                  try {
+                    const subDoc = iframe.contentDocument || iframe.contentWindow.document;
+                    if (subDoc) {
+                      const found = findElementInAllFrames(selector, subDoc);
+                      if (found) return found;
+                    }
+                  } catch (e) {}
+                }
+                return null;
+              };
+
+              const getDeepActiveElement = (doc = document) => {
+                let el = doc.activeElement;
+                while (el && (el.tagName === 'IFRAME' || el.tagName === 'FRAME')) {
+                  try {
+                    const subDoc = el.contentDocument || el.contentWindow.document;
+                    if (subDoc && subDoc.activeElement && subDoc.activeElement !== el) {
+                      el = subDoc.activeElement;
+                    } else {
+                      break;
+                    }
+                  } catch (e) {
+                    break;
+                  }
+                }
+                return el;
+              };
+
+              let target = getDeepActiveElement(document) || document.body;
+              if (sel) {
+                const found = findElementInAllFrames(sel, document);
+                if (found) target = found;
               }
+
+              const win = target.ownerDocument ? (target.ownerDocument.defaultView || window) : window;
 
               if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
                 target.focus();
@@ -3672,14 +3806,14 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               }
 
               target.focus();
-              const selection = window.getSelection();
+              const selection = win.getSelection();
               if (!selection) {
                 return { success: false, error: "Selection API not available in this window context." };
               }
               selection.removeAllRanges();
 
               if (searchTextVal) {
-                const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, null);
+                const walker = win.document.createTreeWalker(target, NodeFilter.SHOW_TEXT, null);
                 let textNode = null;
                 let offset = -1;
 
@@ -3694,7 +3828,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                 }
 
                 if (textNode) {
-                  const range = document.createRange();
+                  const range = win.document.createRange();
                   range.setStart(textNode, offset);
                   range.setEnd(textNode, offset + searchTextVal.length);
                   selection.addRange(range);
@@ -3708,8 +3842,8 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     message: `Successfully highlighted and selected text "${searchTextVal}".`
                   };
                 } else {
-                  if (typeof window.find === 'function') {
-                    const found = window.find(searchTextVal, false, false, true, false, true, false);
+                  if (typeof win.find === 'function') {
+                    const found = win.find(searchTextVal, false, false, true, false, true, false);
                     if (found) {
                       return {
                         success: true,
@@ -3719,11 +3853,11 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                   }
                   return {
                     success: false,
-                    error: `Could not find text "${searchTextVal}" inside the page.`
+                    error: `Could not find text "${searchTextVal}" inside the target.`
                   };
                 }
               } else {
-                const range = document.createRange();
+                const range = win.document.createRange();
                 range.selectNodeContents(target);
                 selection.addRange(range);
                 return {
@@ -3748,15 +3882,76 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             target: { tabId: activeTab.id },
             args: [searchText, replaceText, selector],
             func: async (searchVal, replaceVal, sel) => {
-              let target = document.activeElement || document.body;
-              if (sel) {
+              const findElementInAllFrames = (selector, doc = document) => {
                 try {
-                  const found = document.querySelector(sel);
-                  if (found) {
-                    target = found;
-                    target.focus();
-                  }
+                  const found = doc.querySelector(selector);
+                  if (found) return found;
                 } catch (e) {}
+                const iframes = doc.querySelectorAll('iframe, frame');
+                for (const iframe of iframes) {
+                  try {
+                    const subDoc = iframe.contentDocument || iframe.contentWindow.document;
+                    if (subDoc) {
+                      const found = findElementInAllFrames(selector, subDoc);
+                      if (found) return found;
+                    }
+                  } catch (e) {}
+                }
+                return null;
+              };
+
+              const getDeepActiveElement = (doc = document) => {
+                let el = doc.activeElement;
+                while (el && (el.tagName === 'IFRAME' || el.tagName === 'FRAME')) {
+                  try {
+                    const subDoc = el.contentDocument || el.contentWindow.document;
+                    if (subDoc && subDoc.activeElement && subDoc.activeElement !== el) {
+                      el = subDoc.activeElement;
+                    } else {
+                      break;
+                    }
+                  } catch (e) {
+                    break;
+                  }
+                }
+                return el;
+              };
+
+              let target = getDeepActiveElement(document) || document.body;
+              if (sel) {
+                const found = findElementInAllFrames(sel, document);
+                if (found) {
+                  target = found;
+                  target.focus();
+                }
+              }
+
+              const win = target.ownerDocument ? (target.ownerDocument.defaultView || window) : window;
+
+              const isGoogleDocs = target.classList.contains('docs-textarea') || 
+                                   win.location.hostname.includes('docs.google.com') ||
+                                   findElementInAllFrames('.docs-textarea', document) !== null;
+
+              if (isGoogleDocs) {
+                const docsTextarea = findElementInAllFrames('.docs-textarea', document) || target;
+                docsTextarea.focus();
+                try {
+                  const dataTransfer = new DataTransfer();
+                  dataTransfer.setData('text/plain', replaceVal);
+                  const pasteEvent = new ClipboardEvent('paste', {
+                    bubbles: true,
+                    cancelable: true,
+                    clipboardData: dataTransfer
+                  });
+                  docsTextarea.dispatchEvent(pasteEvent);
+                  docsTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+                  return {
+                    success: true,
+                    message: `Successfully replaced selection with "${replaceVal}" in Google Docs via clipboard simulation.`
+                  };
+                } catch (e) {
+                  return { success: false, error: "Failed to paste in Google Docs: " + e.message };
+                }
               }
 
               if (searchVal) {
@@ -3769,10 +3964,10 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     return { success: false, error: `Could not find text "${searchVal}" inside input/textarea.` };
                   }
                 } else {
-                  const selection = window.getSelection();
+                  const selection = win.getSelection();
                   if (selection) {
                     selection.removeAllRanges();
-                    const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, null);
+                    const walker = win.document.createTreeWalker(target, NodeFilter.SHOW_TEXT, null);
                     let textNode = null;
                     let offset = -1;
 
@@ -3787,12 +3982,12 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     }
 
                     if (textNode) {
-                      const range = document.createRange();
+                      const range = win.document.createRange();
                       range.setStart(textNode, offset);
                       range.setEnd(textNode, offset + searchVal.length);
                       selection.addRange(range);
-                    } else if (typeof window.find === 'function') {
-                      window.find(searchVal, false, false, true, false, true, false);
+                    } else if (typeof win.find === 'function') {
+                      win.find(searchVal, false, false, true, false, true, false);
                     } else {
                       return { success: false, error: `Could not find text "${searchVal}" on page.` };
                     }
@@ -3818,9 +4013,9 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               }
 
               try {
-                const selection = window.getSelection();
+                const selection = win.getSelection();
                 if (selection && selection.rangeCount > 0) {
-                  const executed = document.execCommand('insertText', false, replaceVal);
+                  const executed = win.document.execCommand('insertText', false, replaceVal);
                   if (executed) {
                     return {
                       success: true,
@@ -3831,11 +4026,11 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               } catch (e) {}
 
               if (target.isContentEditable || target.getAttribute('contenteditable') === 'true') {
-                const selection = window.getSelection();
+                const selection = win.getSelection();
                 if (selection && selection.rangeCount > 0) {
                   const range = selection.getRangeAt(0);
                   range.deleteContents();
-                  const textNode = document.createTextNode(replaceVal);
+                  const textNode = win.document.createTextNode(replaceVal);
                   range.insertNode(textNode);
                   range.collapse(false);
                   
