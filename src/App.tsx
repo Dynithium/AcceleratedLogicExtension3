@@ -2021,7 +2021,7 @@ export default function App() {
           const isVisionCapable = simProvider === "gemini" || !!simOpenaiCapabilities?.vision;
           const systemInstructionText = `You are AcceleratedLogic, an advanced browser assistant Chrome Extension.
 You help users analyze web pages, answer questions, and perform research.
-You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, 'search_web' to perform search queries, 'list_tabs' to list open tabs, and 'switch_tab' to switch between tabs.
+You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, 'search_web' to perform search queries, 'list_tabs' to list open tabs, 'switch_tab' to switch between tabs, and 'press_key' to simulate pressing keys on the webpage.
 
 CRITICAL RULES:
 - Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.
@@ -2029,6 +2029,7 @@ CRITICAL RULES:
 - PAGE ANALYSIS RULE: When you open a page or perform a search, you MUST NOT just report that the page/search is opened. You MUST immediately proceed to call 'get_page_dom' (or 'get_page_screenshot') to read, analyze, and comprehend its actual content before moving on or concluding, unless the user explicitly said they only wanted to open the page.
 - REAL-TIME SEARCH RULE: If you are unsure of any answer, or need to retrieve current/real-time information, you MUST use 'search_web' to search, then open or switch to relevant result tabs and extract their text using 'get_page_dom' to analyze the findings. Never speculate or give generic answers without verifying.
 - MULTI-TAB NAVIGATION: You know what each tab is and can switch tabs if needed. Use 'list_tabs' to view all open tabs (IDs, titles, URLs, active status) and use 'switch_tab' to change the active tab when a user asks about another tab, or when you need to gather information from a different open page.
+- NON-DOM INTERACTIVE KEYPRESS RULE: If you are interacting with canvas-based elements, browser games, or non-input interactive areas where WASD or other key actions are required to move or interact (such as playing games, interactive canvases, sliding controls, etc.), use the 'press_key' tool to send raw keyboard presses directly to the page instead of standard 'type_text'.
 ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n" : ""}- Keep explanations conversational, elegant, and markdown-formatted.`;
 
           if (simProvider === "openai-compatible") {
@@ -2212,6 +2213,26 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                       tabId: { type: "number", description: "The unique integer ID of the tab to switch to." }
                     },
                     required: ["tabId"]
+                  }
+                }
+              },
+              {
+                type: "function",
+                function: {
+                  name: "press_key",
+                  description: "Simulates pressing a key (like WASD keys for movement/games, or Enter/Space/Escape) on the webpage.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      key: { type: "string", description: "The key to press (e.g. 'w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'Space', 'Enter', 'Escape')." },
+                      selector: { type: "string", description: "Optional CSS selector of the element to focus before pressing. If omitted, targets current focus or body." },
+                      holdDuration: { type: "number", description: "Optional duration to hold the key down in milliseconds. Defaults to 50ms." },
+                      ctrlKey: { type: "boolean", description: "Optional. Control key held down." },
+                      altKey: { type: "boolean", description: "Optional. Alt key held down." },
+                      shiftKey: { type: "boolean", description: "Optional. Shift key held down." },
+                      metaKey: { type: "boolean", description: "Optional. Meta/Command key held down." }
+                    },
+                    required: ["key"]
                   }
                 }
               }
@@ -2481,6 +2502,32 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                           }
                         },
                         required: ["tabId"]
+                      }
+                    },
+                    {
+                      name: "press_key",
+                      description: "Simulates pressing a key (like WASD keys for movement/games, or Enter/Space/Escape) on the webpage.",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          key: {
+                            type: "STRING",
+                            description: "The key to press (e.g. 'w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'Space', 'Enter', 'Escape')."
+                          },
+                          selector: {
+                            type: "STRING",
+                            description: "Optional CSS selector of the element to focus before pressing. If omitted, targets current focus or body."
+                          },
+                          holdDuration: {
+                            type: "INTEGER",
+                            description: "Optional duration to hold the key down in milliseconds. Defaults to 50ms."
+                          },
+                          ctrlKey: { type: "BOOLEAN", description: "Optional. Control key held down." },
+                          altKey: { type: "BOOLEAN", description: "Optional. Alt key held down." },
+                          shiftKey: { type: "BOOLEAN", description: "Optional. Shift key held down." },
+                          metaKey: { type: "BOOLEAN", description: "Optional. Meta/Command key held down." }
+                        },
+                        required: ["key"]
                       }
                     }
                   ]
@@ -3121,6 +3168,12 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                   error: `[Simulator] Tab with ID ${targetTabId} not found.`
                 };
               }
+            } else if (activeFunctionCall.name === "press_key") {
+              const k = activeFunctionCall.args?.key || "";
+              toolOutput = {
+                success: true,
+                message: `[Simulator] Successfully pressed key "${k}" on the simulated page.`
+              };
             }
 
             // Append status note to the assistant's text
@@ -3142,6 +3195,8 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             } else if (activeFunctionCall.name === "switch_tab") {
               const tabTitle = simTabs.find(t => t.id === Number(activeFunctionCall.args?.tabId))?.title || activeFunctionCall.args?.tabId;
               responseNote = `Switched tab to: ${tabTitle}`;
+            } else if (activeFunctionCall.name === "press_key") {
+              responseNote = `Pressed key: "${activeFunctionCall.args?.key || ""}"`;
             }
 
             let screenshotUrl = "";

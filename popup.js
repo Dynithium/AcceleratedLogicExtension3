@@ -965,7 +965,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const isVisionCapable = apiProvider === "gemini" || !!openaiCapabilities?.vision;
         const systemInstructionText = `You are AcceleratedLogic, an advanced browser assistant Chrome Extension.
 You help users analyze web pages, answer questions, and perform research.
-You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, 'search_web' to perform search queries, 'list_tabs' to list open tabs, and 'switch_tab' to switch between tabs.
+You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, 'search_web' to perform search queries, 'list_tabs' to list open tabs, 'switch_tab' to switch between tabs, and 'press_key' to simulate pressing keys on the webpage.
 
 CRITICAL RULES:
 - Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.
@@ -973,6 +973,7 @@ CRITICAL RULES:
 - PAGE ANALYSIS RULE: When you open a page or perform a search, you MUST NOT just report that the page/search is opened. You MUST immediately proceed to call 'get_page_dom' (or 'get_page_screenshot') to read, analyze, and comprehend its actual content before moving on or concluding, unless the user explicitly said they only wanted to open the page.
 - REAL-TIME SEARCH RULE: If you are unsure of any answer, or need to retrieve current/real-time information, you MUST use 'search_web' to search, then open or switch to relevant result tabs and extract their text using 'get_page_dom' to analyze the findings. Never speculate or give generic answers without verifying.
 - MULTI-TAB NAVIGATION: You know what each tab is and can switch tabs if needed. Use 'list_tabs' to view all open tabs (IDs, titles, URLs, active status) and use 'switch_tab' to change the active tab when a user asks about another tab, or when you need to gather information from a different open page.
+- NON-DOM INTERACTIVE KEYPRESS RULE: If you are interacting with canvas-based elements, browser games, or non-input interactive areas where WASD or other key actions are required to move or interact (such as playing games, interactive canvases, sliding controls, etc.), use the 'press_key' tool to send raw keyboard presses directly to the page instead of standard 'type_text'.
 ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n" : ""}- Keep explanations conversational, elegant, and markdown-formatted.`;
 
         if (apiProvider === "openai-compatible") {
@@ -1169,6 +1170,26 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     tabId: { type: "number", description: "The unique integer ID of the tab to switch to." }
                   },
                   required: ["tabId"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "press_key",
+                description: "Simulates pressing a key (like WASD keys for movement/games, or Enter/Space/Escape) on the webpage.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    key: { type: "string", description: "The key to press (e.g. 'w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'Space', 'Enter', 'Escape')." },
+                    selector: { type: "string", description: "Optional CSS selector of the element to focus before pressing. If omitted, targets current focus or body." },
+                    holdDuration: { type: "number", description: "Optional duration to hold the key down in milliseconds. Defaults to 50ms." },
+                    ctrlKey: { type: "boolean", description: "Optional. Control key held down." },
+                    altKey: { type: "boolean", description: "Optional. Alt key held down." },
+                    shiftKey: { type: "boolean", description: "Optional. Shift key held down." },
+                    metaKey: { type: "boolean", description: "Optional. Meta/Command key held down." }
+                  },
+                  required: ["key"]
                 }
               }
             }
@@ -1453,6 +1474,32 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     },
                     required: ["tabId"]
                   }
+                },
+                {
+                  name: "press_key",
+                  description: "Simulates pressing a key (like WASD keys for movement/games, or Enter/Space/Escape) on the webpage.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      key: {
+                        type: "STRING",
+                        description: "The key to press (e.g. 'w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'Space', 'Enter', 'Escape')."
+                      },
+                      selector: {
+                        type: "STRING",
+                        description: "Optional CSS selector of the element to focus before pressing. If omitted, targets current focus or body."
+                      },
+                      holdDuration: {
+                        type: "INTEGER",
+                        description: "Optional duration to hold the key down in milliseconds. Defaults to 50ms."
+                      },
+                      ctrlKey: { type: "BOOLEAN", description: "Optional. Control key held down." },
+                      altKey: { type: "BOOLEAN", description: "Optional. Alt key held down." },
+                      shiftKey: { type: "BOOLEAN", description: "Optional. Shift key held down." },
+                      metaKey: { type: "BOOLEAN", description: "Optional. Meta/Command key held down." }
+                    },
+                    required: ["key"]
+                  }
                 }
               ]
             }]
@@ -1668,6 +1715,18 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               note = `Clicked coordinate (${activeFunctionCall.args?.x || 0}, ${activeFunctionCall.args?.y || 0}).`;
             } else if (activeFunctionCall.name === "type_text") {
               note = `Typed text: "${activeFunctionCall.args?.text || ""}"`;
+            } else if (activeFunctionCall.name === "scroll_page") {
+              note = `Scrolled page ${activeFunctionCall.args?.direction || "down"}.`;
+            } else if (activeFunctionCall.name === "open_tab") {
+              note = `Opened tab: ${activeFunctionCall.args?.url || ""}`;
+            } else if (activeFunctionCall.name === "search_web") {
+              note = `Searched web for "${activeFunctionCall.args?.query || ""}"`;
+            } else if (activeFunctionCall.name === "list_tabs") {
+              note = `Listed all open tabs.`;
+            } else if (activeFunctionCall.name === "switch_tab") {
+              note = `Switched to tab ID ${activeFunctionCall.args?.tabId || ""}.`;
+            } else if (activeFunctionCall.name === "press_key") {
+              note = `Pressed key: "${activeFunctionCall.args?.key || ""}"`;
             }
             responseDiv.textContent = note;
           }
@@ -2543,6 +2602,13 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             tabId: targetId,
             message: `[Simulator Fallback] Successfully switched active tab to tab ID ${targetId}.`
           });
+        } else if (name === "press_key") {
+          const key = args.key || "";
+          resolve({
+            success: true,
+            key: key,
+            message: `[Simulator Fallback] Successfully pressed key "${key}" in virtual space.`
+          });
         } else {
           resolve({ error: "Unknown tool" });
         }
@@ -3371,6 +3437,98 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                 url: tab ? tab.url : "",
                 message: `Successfully switched active tab to: ${tab ? tab.title : targetId}`
               });
+            }
+          });
+        } else if (name === "press_key") {
+          const key = args.key || "";
+          const selector = args.selector || "";
+          const holdDuration = args.holdDuration !== undefined ? Number(args.holdDuration) : 50;
+          const ctrlKey = !!args.ctrlKey;
+          const altKey = !!args.altKey;
+          const shiftKey = !!args.shiftKey;
+          const metaKey = !!args.metaKey;
+
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            args: [key, selector, holdDuration, ctrlKey, altKey, shiftKey, metaKey],
+            func: async (keyVal, sel, duration, ctrl, alt, shift, meta) => {
+              let target = document.activeElement || document.body;
+              if (sel) {
+                try {
+                  const found = document.querySelector(sel);
+                  if (found) {
+                    target = found;
+                    target.focus();
+                  }
+                } catch (e) {}
+              }
+
+              let keyName = keyVal;
+              let codeName = keyVal;
+              let keyCodeNum = 0;
+              const lowerKey = keyVal.toLowerCase();
+
+              if (lowerKey === 'w') { codeName = 'KeyW'; keyCodeNum = 87; }
+              else if (lowerKey === 'a') { codeName = 'KeyA'; keyCodeNum = 65; }
+              else if (lowerKey === 's') { codeName = 'KeyS'; keyCodeNum = 83; }
+              else if (lowerKey === 'd') { codeName = 'KeyD'; keyCodeNum = 68; }
+              else if (lowerKey === 'e') { codeName = 'KeyE'; keyCodeNum = 69; }
+              else if (lowerKey === 'q') { codeName = 'KeyQ'; keyCodeNum = 81; }
+              else if (lowerKey === 'r') { codeName = 'KeyR'; keyCodeNum = 82; }
+              else if (lowerKey === 'f') { codeName = 'KeyF'; keyCodeNum = 70; }
+              else if (lowerKey === 'x') { codeName = 'KeyX'; keyCodeNum = 88; }
+              else if (lowerKey === 'z') { codeName = 'KeyZ'; keyCodeNum = 90; }
+              else if (keyVal === 'ArrowUp') { codeName = 'ArrowUp'; keyCodeNum = 38; }
+              else if (keyVal === 'ArrowDown') { codeName = 'ArrowDown'; keyCodeNum = 40; }
+              else if (keyVal === 'ArrowLeft') { codeName = 'ArrowLeft'; keyCodeNum = 37; }
+              else if (keyVal === 'ArrowRight') { codeName = 'ArrowRight'; keyCodeNum = 39; }
+              else if (keyVal === 'Enter') { codeName = 'Enter'; keyCodeNum = 13; }
+              else if (keyVal === 'Space' || keyVal === ' ') { keyName = ' '; codeName = 'Space'; keyCodeNum = 32; }
+              else if (keyVal === 'Escape') { codeName = 'Escape'; keyCodeNum = 27; }
+              else if (keyVal === 'Backspace') { codeName = 'Backspace'; keyCodeNum = 8; }
+              else if (keyVal === 'Tab') { codeName = 'Tab'; keyCodeNum = 9; }
+              else {
+                keyCodeNum = keyVal.charCodeAt(0) || 0;
+              }
+
+              const commonConfig = {
+                key: keyName,
+                code: codeName,
+                keyCode: keyCodeNum,
+                which: keyCodeNum,
+                bubbles: true,
+                cancelable: true,
+                ctrlKey: ctrl,
+                altKey: alt,
+                shiftKey: shift,
+                metaKey: meta
+              };
+
+              const downEvent = new KeyboardEvent('keydown', commonConfig);
+              target.dispatchEvent(downEvent);
+
+              if (keyName.length === 1) {
+                const pressEvent = new KeyboardEvent('keypress', commonConfig);
+                target.dispatchEvent(pressEvent);
+              }
+
+              if (duration > 0) {
+                await new Promise(r => setTimeout(r, duration));
+              }
+
+              const upEvent = new KeyboardEvent('keyup', commonConfig);
+              target.dispatchEvent(upEvent);
+
+              return {
+                success: true,
+                message: `Successfully pressed key "${keyVal}" on element <${target.tagName.toLowerCase()}>${sel ? " matching selector: " + sel : ""}.`
+              };
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve(results[0].result);
+            } else {
+              resolve({ success: false, error: "Script injection failed for key press simulation." });
             }
           });
         } else {
