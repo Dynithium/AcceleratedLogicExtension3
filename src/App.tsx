@@ -56,7 +56,17 @@ const MANIFEST_CODE = `{
   },
   "background": {
     "service_worker": "background.js"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "katex/fonts/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
 }
 `;
 
@@ -8491,9 +8501,7 @@ I received your query: *"${userMsgText}"*
 This simulator mimics the exact behavior of the Chrome Extension you will load. To test real Gemini capabilities directly in this preview:
 1. Click the gear icon (**⚙️**) inside this phone mock-up.
 2. Paste your Gemini API key from Google AI Studio.
-3. Type any question, and the simulator will connect directly to **${activeModelId}** for a fully responsive, real-time conversation!
-
-To install this tool directly into your Chrome browser, check out the **Installation Guide** tab!`;
+3. Type any question, and the simulator will connect directly to **${activeModelId}** for a fully responsive, real-time conversation!`;
         }
 
         setSimMessages((prev) => [
@@ -8688,30 +8696,6 @@ To install this tool directly into your Chrome browser, check out the **Installa
                     <span>📸</span>
                     <span>Simulate Page Capture in Sidebar</span>
                   </button>
-
-                  {/* Rich-Text Editor Sandbox (Simulating Quill / Draft.js / ProseMirror) */}
-                  <div className="mt-4 p-2.5 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-[9px] text-violet-400 font-bold uppercase tracking-wide flex items-center gap-1">
-                        📝 Quill Rich-Text Editor Sandbox
-                      </span>
-                      <span className="text-[8px] bg-violet-500/10 text-violet-400 px-1 rounded font-mono">Interactive</span>
-                    </div>
-                    {/* Rich text formatting toolbar mockup */}
-                    <div className="flex gap-1.5 p-1 bg-slate-950 border border-slate-800 rounded text-slate-500 text-[9px] font-mono select-none">
-                      <span className="font-bold hover:text-slate-300 cursor-pointer px-1">B</span>
-                      <span className="italic hover:text-slate-300 cursor-pointer px-1">I</span>
-                      <span className="underline hover:text-slate-300 cursor-pointer px-1">U</span>
-                      <span className="hover:text-slate-300 cursor-pointer px-1">Link</span>
-                      <span className="hover:text-slate-300 cursor-pointer px-1">Quote</span>
-                    </div>
-                    <div 
-                      contentEditable
-                      suppressContentEditableWarning
-                      className="ql-editor ProseMirror min-h-[50px] p-2 bg-slate-950 text-slate-200 text-[10px] rounded border border-slate-800 focus:outline-none focus:border-violet-500/50 leading-relaxed font-sans empty:before:content-['Type_your_rich-text_notes_here...'] empty:before:text-slate-600 empty:before:pointer-events-none"
-                      style={{ outline: 'none' }}
-                    ></div>
-                  </div>
                 </div>
               </div>
 
@@ -9170,7 +9154,7 @@ To install this tool directly into your Chrome browser, check out the **Installa
                       onKeyDown={(e) => {
                         if (e.key === "Enter") handleSimSend();
                       }}
-                      placeholder="Ask Gemini in side panel..."
+                      placeholder="Ask Gemini..."
                       className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-100 flex-1 outline-none focus:border-blue-500"
                     />
 
