@@ -3528,83 +3528,88 @@ CRITICAL RULES:
   function formatResponse(text) {
     if (!text) return "";
     
-    // Escape HTML first to prevent XSS
-    let escaped = text
+    const mathBlocks = [];
+    let processedText = text;
+
+    // 1. Extract Display Math: $ ... $ or \\[ ... \\]
+    processedText = processedText.replace(/\\$\\$([\\s\\S]+?)\\$\\$/g, (match, formula) => {
+      const id = \`%%LATEXBLOCK\${mathBlocks.length}%%\`;
+      const rendered = renderLatexToHtml(formula.trim(), true);
+      mathBlocks.push({ id, rendered });
+      return id;
+    });
+
+    processedText = processedText.replace(/\\\\\\[([\\s\\S]+?)\\\\\\]/g, (match, formula) => {
+      const id = \`%%LATEXBLOCK\${mathBlocks.length}%%\`;
+      const rendered = renderLatexToHtml(formula.trim(), true);
+      mathBlocks.push({ id, rendered });
+      return id;
+    });
+
+    // 2. Extract Inline Math: $ ... $ or \\( ... \\)
+    processedText = processedText.replace(/\\$([^\\$\\n]+?)\\$/g, (match, formula) => {
+      if (/^\\d+(\\.\\d+)?(M|K|B)?$/.test(formula)) {
+        return match; 
+      }
+      const id = \`%%LATEXINLINE\${mathBlocks.length}%%\`;
+      const rendered = renderLatexToHtml(formula.trim(), false);
+      mathBlocks.push({ id, rendered });
+      return id;
+    });
+
+    processedText = processedText.replace(/\\\\\\(([\\s\\S]+?)\\\\\\)/g, (match, formula) => {
+      const id = \`%%LATEXINLINE\${mathBlocks.length}%%\`;
+      const rendered = renderLatexToHtml(formula.trim(), false);
+      mathBlocks.push({ id, rendered });
+      return id;
+    });
+
+    // 3. Extract Code Blocks: \`\`\`lang\\ncode\\n\`\`\`
+    const codeBlocks = [];
+    processedText = processedText.replace(/\`\`\`(\\w*)[^\\n\\r]*\\r?\\n([\\s\\S]*?)\`\`\`/g, (match, lang, code) => {
+      const id = \`%%CODEBLOCK\${codeBlocks.length}%%\`;
+      codeBlocks.push({ id, lang: lang || 'code', code: code });
+      return id;
+    });
+
+    // 4. Now safely escape HTML of the remaining text (protecting placeholders, which don't have & < >)
+    let escaped = processedText
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-    const latexBlocks = [];
-    const latexInlines = [];
-
-    // Match block math: $$ ... $$ or \\[ ... \\]
-    escaped = escaped.replace(/\\$\\$([\\s\\S]+?)\\$\\$/g, (match, formula) => {
-      const id = \`%%LATEX_BLOCK_\${latexBlocks.length}%%\`;
-      latexBlocks.push(formula.trim());
-      return id;
-    });
-    
-    escaped = escaped.replace(/\\\\\\[([\\s\\S]+?)\\\\\\]/g, (match, formula) => {
-      const id = \`%%LATEX_BLOCK_\${latexBlocks.length}%%\`;
-      latexBlocks.push(formula.trim());
-      return id;
-    });
-
-    // Match inline math: $ ... $ (avoiding double $ and things like $10 or $5.50)
-    escaped = escaped.replace(/\\$([^\\$\\n]+?)\\$/g, (match, formula) => {
-      if (/^\\d+(\\.\\d+)?(M|K|B)?$/.test(formula)) {
-        return match; 
-      }
-      const id = \`%%LATEX_INLINE_\${latexInlines.length}%%\`;
-      latexInlines.push(formula.trim());
-      return id;
-    });
-
-    escaped = escaped.replace(/\\\\\\(([\\s\\S]+?)\\\\\\)/g, (match, formula) => {
-      const id = \`%%LATEX_INLINE_\${latexInlines.length}%%\`;
-      latexInlines.push(formula.trim());
-      return id;
-    });
-
-    // Parse Code Blocks: \`\`\`lang\\ncode\\n\`\`\`
-    const codeBlocks = [];
-    escaped = escaped.replace(/\`\`\`(\\w*)[^\\n\\r]*\\r?\\n([\\s\\S]*?)\`\`\`/g, (match, lang, code) => {
-      const id = \`%%CODE_BLOCK_\${codeBlocks.length}%%\`;
-      codeBlocks.push({ lang: lang || 'code', code: code });
-      return id;
-    });
-
-    // Parse Inline Code: \`code\`
+    // 5. Parse Inline Code: \`code\`
     escaped = escaped.replace(/\`([^\`\\n]+?)\`/g, (match, code) => {
       return \`<code class="inline-code">\${code}</code>\`;
     });
 
-    // Parse Headers
+    // 6. Parse Headers
     escaped = escaped.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
     escaped = escaped.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
     escaped = escaped.replace(/^# (.*?)$/gm, '<h1>$1</h1>');
 
-    // Bold & Italic
+    // 7. Bold & Italic
     escaped = escaped.replace(/\\*\\*([\\s\\S]+?)\\*\\*/g, '<strong>$1</strong>');
     escaped = escaped.replace(/__([\\s\\S]+?)__/g, '<strong>$1</strong>');
     escaped = escaped.replace(/\\*([\\s\\S]+?)\\*/g, '<em>$1</em>');
     escaped = escaped.replace(/_([\\s\\S]+?)_/g, '<em>$1</em>');
 
-    // Blockquotes
+    // 8. Blockquotes
     escaped = escaped.replace(/^&gt; (.*?)$/gm, '<blockquote>$1</blockquote>');
 
-    // Lists
+    // 9. Lists
     escaped = escaped.replace(/^\\s*[-*]\\s+(.*?)$/gm, '<li>$1</li>');
     escaped = escaped.replace(/^\\s*\\d+\\.\\s+(.*?)$/gm, '<li class="ordered">$1</li>');
 
-    // Paragraphs and Newlines
+    // 10. Paragraphs and Newlines
     const lines = escaped.split(/\\n{2,}/);
     const formattedParagraphs = lines.map(line => {
       line = line.trim();
       if (!line) return "";
       
-      if (line.startsWith("%%CODE_BLOCK_") || 
-          line.startsWith("%%LATEX_BLOCK_") || 
+      if (line.startsWith("%%CODEBLOCK") || 
+          line.startsWith("%%LATEXBLOCK") || 
+          line.startsWith("%%LATEXINLINE") || 
           line.startsWith("<h") || 
           line.startsWith("<blockquote") ||
           line.startsWith("<li")) {
@@ -3616,16 +3621,15 @@ CRITICAL RULES:
     
     escaped = formattedParagraphs.filter(Boolean).join("\\n");
 
-    // Group adjacent list items
+    // 11. Group adjacent list items
     escaped = escaped.replace(/(<li>.*?<\\/li>\\n?)+/g, (match) => \`<ul>\${match}</ul>\`);
     escaped = escaped.replace(/(<li class="ordered">.*?<\\/li>\\n?)+/g, (match) => {
       const clean = match.replace(/ class="ordered"/g, '');
       return \`<ol>\${clean}</ol>\`;
     });
 
-    // Re-insert Code Blocks with copy buttons
-    codeBlocks.forEach((item, index) => {
-      const placeholder = \`%%CODE_BLOCK_\${index}%%\`;
+    // 12. Re-insert Code Blocks with copy buttons
+    codeBlocks.forEach((item) => {
       const cleanCode = item.code.trim();
       const codeHtml = \`
         <div class="code-block-container">
@@ -3637,25 +3641,12 @@ CRITICAL RULES:
           <pre class="code-block-content"><code>\${cleanCode}</code></pre>
         </div>
       \`;
-      escaped = escaped.replace(placeholder, () => codeHtml);
+      escaped = escaped.replace(item.id, () => codeHtml);
     });
 
-    // Re-insert LaTeX Blocks with serif equations
-    latexBlocks.forEach((formula, index) => {
-      const placeholder = \`%%LATEX_BLOCK_\${index}%%\`;
-      const mathHtml = \`
-        <div class="latex-block">
-          <div class="latex-formula">\${renderLatexToHtml(formula, true)}</div>
-        </div>
-      \`;
-      escaped = escaped.replace(placeholder, () => mathHtml);
-    });
-
-    // Re-insert LaTeX Inlines
-    latexInlines.forEach((formula, index) => {
-      const placeholder = \`%%LATEX_INLINE_\${index}%%\`;
-      const mathHtml = \`<span class="latex-inline">\${renderLatexToHtml(formula, false)}</span>\`;
-      escaped = escaped.replace(placeholder, () => mathHtml);
+    // 13. Re-insert LaTeX Blocks & Inlines
+    mathBlocks.forEach((block) => {
+      escaped = escaped.replace(block.id, () => block.rendered);
     });
 
     return escaped;
@@ -3677,6 +3668,7 @@ CRITICAL RULES:
       }
     }
 
+    // Fallback: Pure CSS and unicode rendering
     let html = formula;
 
     // Greek Alphabet and Common Math Symbols
@@ -3725,7 +3717,15 @@ CRITICAL RULES:
     html = html.replace(/\\\\right/g, '');
     html = html.replace(/\\\\/g, '');
 
-    return html;
+    if (isBlock) {
+      return \`
+        <div class="latex-block">
+          <div class="latex-formula">\${html}</div>
+        </div>
+      \`;
+    } else {
+      return \`<span class="latex-inline">\${html}</span>\`;
+    }
   }
 
   // Generates a high-quality, valid mock JPEG browser screenshot to feed into Gemini API vision encoder
@@ -6246,73 +6246,87 @@ const CodeBlock = ({ lang, content }: { lang: string; content: string; key?: any
 
 const renderFormattedContent = (text: string) => {
   if (!text) return null;
-  const blocks: Array<{ type: 'text' | 'latex' | 'code'; content: string; lang?: string }> = [];
-  let currentText = text;
-  
-  while (currentText.length > 0) {
-    const latexStart = currentText.indexOf('$$');
-    const codeStart = currentText.indexOf('```');
-    
-    if (latexStart === -1 && codeStart === -1) {
-      blocks.push({ type: 'text', content: currentText });
-      break;
+
+  const placeholders: Array<{ id: string; type: 'latex-block' | 'latex-inline' | 'code-block'; content: any }> = [];
+  let processedText = text;
+
+  // 1. Extract Display Math: $$ ... $$
+  processedText = processedText.replace(/\$\$([\s\S]+?)\$\$/g, (match, formula) => {
+    const id = `%%PLACEHOLDER_LATEX_BLOCK_${placeholders.length}%%`;
+    placeholders.push({
+      id,
+      type: 'latex-block',
+      content: formula.trim()
+    });
+    return id;
+  });
+
+  // 2. Extract Inline Math: $ ... $
+  processedText = processedText.replace(/\$([^\$\n]+?)\$/g, (match, formula) => {
+    if (/^\d+(\.\d+)?(M|K|B)?$/.test(formula)) {
+      return match; 
     }
-    
-    if (latexStart !== -1 && (codeStart === -1 || latexStart < codeStart)) {
-      if (latexStart > 0) {
-        blocks.push({ type: 'text', content: currentText.substring(0, latexStart) });
-      }
-      const latexEnd = currentText.indexOf('$$', latexStart + 2);
-      if (latexEnd === -1) {
-        blocks.push({ type: 'latex', content: currentText.substring(latexStart + 2) });
-        break;
-      } else {
-        blocks.push({ type: 'latex', content: currentText.substring(latexStart + 2, latexEnd) });
-        currentText = currentText.substring(latexEnd + 2);
-      }
-    } else {
-      if (codeStart > 0) {
-        blocks.push({ type: 'text', content: currentText.substring(0, codeStart) });
-      }
-      const codeEnd = currentText.indexOf('```', codeStart + 3);
-      if (codeEnd === -1) {
-        blocks.push({ type: 'code', content: currentText.substring(codeStart + 3), lang: 'code' });
-        break;
-      } else {
-        const fullCodeBlock = currentText.substring(codeStart + 3, codeEnd);
-        const firstNewline = fullCodeBlock.indexOf('\n');
-        let lang = 'code';
-        let code = fullCodeBlock;
-        if (firstNewline !== -1) {
-          lang = fullCodeBlock.substring(0, firstNewline).trim() || 'code';
-          code = fullCodeBlock.substring(firstNewline + 1);
-        }
-        blocks.push({ type: 'code', content: code.trim(), lang });
-        currentText = currentText.substring(codeEnd + 3);
-      }
-    }
-  }
+    const id = `%%PLACEHOLDER_LATEX_INLINE_${placeholders.length}%%`;
+    placeholders.push({
+      id,
+      type: 'latex-inline',
+      content: formula.trim()
+    });
+    return id;
+  });
+
+  // 3. Extract Code Blocks: ```lang\ncode\n```
+  processedText = processedText.replace(/```(\w*)[^\n\r]*\r?\n([\s\S]*?)```/g, (match, lang, code) => {
+    const id = `%%PLACEHOLDER_CODE_BLOCK_${placeholders.length}%%`;
+    placeholders.push({
+      id,
+      type: 'code-block',
+      content: { lang: lang || 'code', code: code.trim() }
+    });
+    return id;
+  });
+
+  // 4. Split the text by placeholders so we can render them as React components natively
+  const placeholderRegex = /(%%PLACEHOLDER_(?:LATEX_BLOCK|LATEX_INLINE|CODE_BLOCK)_\d+%%)/g;
+  const parts = processedText.split(placeholderRegex);
 
   return (
     <div className="space-y-2 text-[11px] leading-relaxed text-slate-200">
-      {blocks.map((block, idx) => {
-        if (block.type === 'latex') {
-          return (
-            <div key={idx} className="flex justify-center items-center my-2.5 p-2.5 rounded-lg border border-slate-700/60 bg-slate-900/60 text-center tracking-wide text-xs text-slate-100 overflow-x-auto">
-              <RenderLatex formula={block.content} displayMode={true} />
-            </div>
-          );
-        } else if (block.type === 'code') {
-          return (
-            <CodeBlock key={idx} lang={block.lang || 'code'} content={block.content} />
-          );
-        } else {
-          return (
-            <div key={idx} className="space-y-1.5">
-              {renderMarkdownTextBlock(block.content)}
-            </div>
-          );
+      {parts.map((part, partIdx) => {
+        if (!part) return null;
+
+        // Check if this part is a placeholder
+        const match = part.match(/%%PLACEHOLDER_(LATEX_BLOCK|LATEX_INLINE|CODE_BLOCK)_(\d+)%%/);
+        if (match) {
+          const type = match[1];
+          const idx = parseInt(match[2], 10);
+          const placeholderObj = placeholders[idx];
+
+          if (placeholderObj.type === 'latex-block') {
+            return (
+              <div key={partIdx} className="flex justify-center items-center my-2.5 p-2.5 rounded-lg border border-slate-700/60 bg-slate-900/60 text-center tracking-wide text-xs text-slate-100 overflow-x-auto">
+                <RenderLatex formula={placeholderObj.content} displayMode={true} />
+              </div>
+            );
+          } else if (placeholderObj.type === 'latex-inline') {
+            return (
+              <span key={partIdx} className="inline-block align-middle my-0.5 px-0.5 text-blue-400 font-sans">
+                <RenderLatex formula={placeholderObj.content} displayMode={false} />
+              </span>
+            );
+          } else if (placeholderObj.type === 'code-block') {
+            return (
+              <CodeBlock key={partIdx} lang={placeholderObj.content.lang} content={placeholderObj.content.code} />
+            );
+          }
         }
+
+        // If it's normal text, render it with markdown styles
+        return (
+          <div key={partIdx} className="space-y-1.5">
+            {renderMarkdownTextBlock(part)}
+          </div>
+        );
       })}
     </div>
   );
@@ -6564,10 +6578,6 @@ const DEFAULT_SIM_MOCK_TABS = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<"simulator" | "install" | "explorer">("simulator");
-  const [activeFile, setActiveFile] = useState<string>("manifest.json");
-  const [copied, setCopied] = useState<boolean>(false);
-
   // Simulator States
   const [simProvider, setSimProvider] = useState<"gemini" | "openai-compatible">("gemini");
   const [simApiKey, setSimApiKey] = useState<string>("");
@@ -6673,13 +6683,6 @@ export default function App() {
       simChatEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [simMessages, simLoading]);
-
-  // Copy code utility
-  const handleCopy = (code: string) => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   // File Upload simulation in simulator
   const handleSimFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -8506,34 +8509,6 @@ To install this tool directly into your Chrome browser, check out the **Installa
     }
   };
 
-  const getFileCode = () => {
-    switch (activeFile) {
-      case "manifest.json": return MANIFEST_CODE;
-      case "popup.html": return POPUP_HTML_CODE;
-      case "popup.css": return POPUP_CSS_CODE;
-      case "popup.js": return POPUP_JS_CODE;
-      case "background.js": return BACKGROUND_CODE;
-      default: return "";
-    }
-  };
-
-  const getFileDesc = () => {
-    switch (activeFile) {
-      case "manifest.json":
-        return "Declares the chrome extension's permissions, Manifest V3 schemas, icons, and background workers.";
-      case "popup.html":
-        return "Defines the structures, panels, and forms inside the collapsible extension widget.";
-      case "popup.css":
-        return "Styles the visual layout, custom scrollbar, glow-effects, and chat bubble systems with modern dark values.";
-      case "popup.js":
-        return "Drives settings synchronization in chrome storage, file serialization to base64, tab captures, and Gemini endpoints.";
-      case "background.js":
-        return "A lightweight Manifest V3 background service worker to initialize local state configurations.";
-      default:
-        return "";
-    }
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased pb-20">
       {/* Background Decorative Gradients */}
@@ -8578,215 +8553,12 @@ To install this tool directly into your Chrome browser, check out the **Installa
       </header>
 
       {/* Main Container */}
-      <main className="max-w-6xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <main className="max-w-6xl mx-auto px-6 flex justify-center items-start">
         
-        {/* Left Side: Navigation Tabs and Worksheets */}
-        <section className="lg:col-span-5 space-y-6">
-          
-          {/* Navigation Controls */}
-          <div className="flex items-center bg-slate-900/60 p-1 border border-slate-800 rounded-xl">
-            <button
-              onClick={() => setActiveTab("simulator")}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition ${
-                activeTab === "simulator"
-                  ? "bg-slate-800 text-white border-b border-blue-500/30"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Laptop className="w-4 h-4" />
-              Live Interactive Simulator
-            </button>
-            <button
-              onClick={() => setActiveTab("install")}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition ${
-                activeTab === "install"
-                  ? "bg-slate-800 text-white border-b border-blue-500/30"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <HelpCircle className="w-4 h-4" />
-              Installation Steps
-            </button>
-            <button
-              onClick={() => setActiveTab("explorer")}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition ${
-                activeTab === "explorer"
-                  ? "bg-slate-800 text-white border-b border-blue-500/30"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <FileCode className="w-4 h-4" />
-              Inspect Source Code
-            </button>
-          </div>
-
-          {/* TAB CONTENT: SIMULATOR EXPLANATION */}
-          {activeTab === "simulator" && (
-            <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 space-y-4">
-              <h3 className="font-display text-lg font-semibold text-white flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-blue-400" />
-                Try the Live Extension Mockup!
-              </h3>
-              <p className="text-slate-300 text-sm leading-relaxed">
-                Interact with the phone shell on the right. It operates exactly like your downloaded Chrome Extension will:
-              </p>
-              <ul className="space-y-3.5 text-slate-400 text-sm pl-1">
-                <li className="flex gap-2 items-start">
-                  <span className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center text-xs shrink-0 mt-0.5">1</span>
-                  <span><strong>Config Settings (⚙️):</strong> Click the gear icon inside the mockup to paste your <strong>Gemini API key</strong> and select a model.</span>
-                </li>
-                <li className="flex gap-2 items-start">
-                  <span className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center text-xs shrink-0 mt-0.5">2</span>
-                  <span><strong>Attach Documents & Content (+):</strong> Click the plus icon to upload documents or simulate a visual tab capture along with the webpage DOM text contents!</span>
-                </li>
-                <li className="flex gap-2 items-start">
-                  <span className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center text-xs shrink-0 mt-0.5">3</span>
-                  <span><strong>No API Key yet?</strong> No problem! Send a query anyway, and the simulator will display a detailed explanation of how it parses page hierarchies and forwards payload contexts to Gemini.</span>
-                </li>
-              </ul>
-              <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/15 text-blue-300 text-xs leading-relaxed">
-                💡 <strong>Privacy First:</strong> Your custom API key is stored purely locally inside your browser's context or extension storage. No third-party relays, servers, or intermediaries ever see your credentials.
-              </div>
-            </div>
-          )}
-
-          {/* TAB CONTENT: INSTALLATION GUIDE */}
-          {activeTab === "install" && (
-            <div className="space-y-4">
-              <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6">
-                <h3 className="font-display text-lg font-semibold text-white flex items-center gap-2 mb-4">
-                  <Puzzle className="w-5 h-5 text-blue-400" />
-                  Interactive Extension Installation Guide
-                </h3>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  
-                  {/* Step 1 */}
-                  <div className="bg-slate-900/60 p-4 border border-slate-800 rounded-xl space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Step 1</span>
-                      <span className="text-xs font-mono text-slate-500">ZIP</span>
-                    </div>
-                    <h4 className="font-semibold text-white text-sm">Export ZIP from AI Studio</h4>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      Click the settings menu in the top-right corner of Google AI Studio and download this workspace as a compressed ZIP.
-                    </p>
-                  </div>
-
-                  {/* Step 2 */}
-                  <div className="bg-slate-900/60 p-4 border border-slate-800 rounded-xl space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Step 2</span>
-                      <FolderOpen className="w-4 h-4 text-slate-500" />
-                    </div>
-                    <h4 className="font-semibold text-white text-sm">Extract Files</h4>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      Locate the downloaded `.zip` file on your computer and extract (unzip) it into a dedicated folder on your drive.
-                    </p>
-                  </div>
-
-                  {/* Step 3 */}
-                  <div className="bg-slate-900/60 p-4 border border-slate-800 rounded-xl space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Step 3</span>
-                      <span className="text-xs font-mono text-slate-500">chrome://</span>
-                    </div>
-                    <h4 className="font-semibold text-white text-sm">Open Extensions</h4>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      Launch your Google Chrome browser, type <code className="text-blue-300 font-mono text-xs select-all">chrome://extensions</code> in the address bar, and press Enter.
-                    </p>
-                  </div>
-
-                  {/* Step 4 */}
-                  <div className="bg-slate-900/60 p-4 border border-slate-800 rounded-xl space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Step 4</span>
-                      <div className="w-5 h-3 bg-blue-500 rounded-full relative"><div className="w-2.5 h-2.5 bg-white rounded-full absolute right-0.5 top-0.5" /></div>
-                    </div>
-                    <h4 className="font-semibold text-white text-sm">Developer Mode</h4>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      In the top-right corner of the Extensions page, switch the <strong>"Developer Mode"</strong> toggle to the **ON** position.
-                    </p>
-                  </div>
-
-                  {/* Step 5 */}
-                  <div className="bg-slate-900/60 p-4 border border-slate-800 rounded-xl space-y-2 col-span-1 sm:col-span-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Step 5</span>
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    </div>
-                    <h4 className="font-semibold text-white text-sm">Click "Load Unpacked"</h4>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      Click the <strong>"Load unpacked"</strong> button in the top-left menu bar. Select the root folder where you extracted the project. Chrome will install it immediately!
-                    </p>
-                  </div>
-
-                </div>
-
-                <div className="mt-4 p-4 rounded-xl bg-violet-500/5 border border-violet-500/15 text-slate-300 text-xs flex gap-3 items-start">
-                  <span className="text-lg">📌</span>
-                  <p className="leading-relaxed">
-                    <strong>Quick Tip:</strong> Click the puzzle-piece icon on your Chrome toolbar, find <strong>"Gemini Web Companion"</strong>, and click the pin icon. This places the glowing sparkle button directly in your browser bar for single-click access!
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB CONTENT: CODE EXPLORER */}
-          {activeTab === "explorer" && (
-            <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <h3 className="font-display text-lg font-semibold text-white flex items-center gap-2">
-                  <FileCode className="w-5 h-5 text-blue-400" />
-                  Code Explorer
-                </h3>
-                <button
-                  onClick={() => handleCopy(getFileCode())}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-200 transition cursor-pointer"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  {copied ? "Copied" : "Copy Code"}
-                </button>
-              </div>
-
-              {/* File selection Tabs */}
-              <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-3">
-                {["manifest.json", "popup.html", "popup.css", "popup.js", "background.js"].map((fileName) => (
-                  <button
-                    key={fileName}
-                    onClick={() => setActiveFile(fileName)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-mono transition cursor-pointer ${
-                      activeFile === fileName
-                        ? "bg-blue-600/15 text-blue-400 border border-blue-500/30"
-                        : "bg-slate-900/40 text-slate-400 hover:text-slate-200"
-                    }`}
-                  >
-                    {fileName}
-                  </button>
-                ))}
-              </div>
-
-              {/* File Info */}
-              <p className="text-xs text-slate-400 leading-relaxed italic">
-                {getFileDesc()}
-              </p>
-
-              {/* Code Panel */}
-              <div className="relative overflow-hidden rounded-xl border border-slate-800 bg-slate-950 p-4">
-                <pre className="overflow-x-auto text-[11px] font-mono leading-relaxed text-slate-300 max-h-[400px]">
-                  <code>{getFileCode()}</code>
-                </pre>
-              </div>
-            </div>
-          )}
-
-        </section>
-
-        {/* Right Side: Extension Screen Simulator Shell */}
-        <section className="lg:col-span-7 flex justify-center w-full">
+        {/* Extension Screen Simulator Shell */}
+        <section className="w-full flex justify-center">
           {/* Desktop Browser Mockup Container */}
-          <div className="w-full max-w-[680px] bg-slate-900 border border-slate-800/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[580px] relative">
+          <div className="w-full max-w-5xl bg-slate-900 border border-slate-800/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[650px] relative">
             
             {/* macOS / Chrome Title Bar Bar */}
             <div className="bg-slate-950 px-4 py-2.5 flex items-center justify-between gap-2 shrink-0 border-b border-slate-800/80 select-none">

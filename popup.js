@@ -1997,83 +1997,88 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
   function formatResponse(text) {
     if (!text) return "";
     
-    // Escape HTML first to prevent XSS
-    let escaped = text
+    const mathBlocks = [];
+    let processedText = text;
+
+    // 1. Extract Display Math: $$ ... $$ or \[ ... \]
+    processedText = processedText.replace(/\$\$([\s\S]+?)\$\$/g, (match, formula) => {
+      const id = `%%LATEXBLOCK${mathBlocks.length}%%`;
+      const rendered = renderLatexToHtml(formula.trim(), true);
+      mathBlocks.push({ id, rendered });
+      return id;
+    });
+
+    processedText = processedText.replace(/\\\[([\s\S]+?)\\\]/g, (match, formula) => {
+      const id = `%%LATEXBLOCK${mathBlocks.length}%%`;
+      const rendered = renderLatexToHtml(formula.trim(), true);
+      mathBlocks.push({ id, rendered });
+      return id;
+    });
+
+    // 2. Extract Inline Math: $ ... $ or \( ... \)
+    processedText = processedText.replace(/\$([^\$\n]+?)\$/g, (match, formula) => {
+      if (/^\d+(\.\d+)?(M|K|B)?$/.test(formula)) {
+        return match; 
+      }
+      const id = `%%LATEXINLINE${mathBlocks.length}%%`;
+      const rendered = renderLatexToHtml(formula.trim(), false);
+      mathBlocks.push({ id, rendered });
+      return id;
+    });
+
+    processedText = processedText.replace(/\\\(([\s\S]+?)\\\)/g, (match, formula) => {
+      const id = `%%LATEXINLINE${mathBlocks.length}%%`;
+      const rendered = renderLatexToHtml(formula.trim(), false);
+      mathBlocks.push({ id, rendered });
+      return id;
+    });
+
+    // 3. Extract Code Blocks: ```lang\ncode\n```
+    const codeBlocks = [];
+    processedText = processedText.replace(/```(\w*)[^\n\r]*\r?\n([\s\S]*?)```/g, (match, lang, code) => {
+      const id = `%%CODEBLOCK${codeBlocks.length}%%`;
+      codeBlocks.push({ id, lang: lang || 'code', code: code });
+      return id;
+    });
+
+    // 4. Now safely escape HTML of the remaining text (protecting placeholders, which don't have & < >)
+    let escaped = processedText
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-    const latexBlocks = [];
-    const latexInlines = [];
-
-    // Match block math: $$ ... $$ or \[ ... \]
-    escaped = escaped.replace(/\$\$([\s\S]+?)\$\$/g, (match, formula) => {
-      const id = `%%LATEX_BLOCK_${latexBlocks.length}%%`;
-      latexBlocks.push(formula.trim());
-      return id;
-    });
-    
-    escaped = escaped.replace(/\\\[([\s\S]+?)\\\]/g, (match, formula) => {
-      const id = `%%LATEX_BLOCK_${latexBlocks.length}%%`;
-      latexBlocks.push(formula.trim());
-      return id;
-    });
-
-    // Match inline math: $ ... $ (avoiding double $ and things like $10 or $5.50)
-    escaped = escaped.replace(/\$([^\$\n]+?)\$/g, (match, formula) => {
-      if (/^\d+(\.\d+)?(M|K|B)?$/.test(formula)) {
-        return match; 
-      }
-      const id = `%%LATEX_INLINE_${latexInlines.length}%%`;
-      latexInlines.push(formula.trim());
-      return id;
-    });
-
-    escaped = escaped.replace(/\\\(([\s\S]+?)\\\)/g, (match, formula) => {
-      const id = `%%LATEX_INLINE_${latexInlines.length}%%`;
-      latexInlines.push(formula.trim());
-      return id;
-    });
-
-    // Parse Code Blocks: ```lang\ncode\n```
-    const codeBlocks = [];
-    escaped = escaped.replace(/```(\w*)[^\n\r]*\r?\n([\s\S]*?)```/g, (match, lang, code) => {
-      const id = `%%CODE_BLOCK_${codeBlocks.length}%%`;
-      codeBlocks.push({ lang: lang || 'code', code: code });
-      return id;
-    });
-
-    // Parse Inline Code: `code`
+    // 5. Parse Inline Code: `code`
     escaped = escaped.replace(/`([^`\n]+?)`/g, (match, code) => {
       return `<code class="inline-code">${code}</code>`;
     });
 
-    // Parse Headers
+    // 6. Parse Headers
     escaped = escaped.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
     escaped = escaped.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
     escaped = escaped.replace(/^# (.*?)$/gm, '<h1>$1</h1>');
 
-    // Bold & Italic
+    // 7. Bold & Italic
     escaped = escaped.replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>');
     escaped = escaped.replace(/__([\s\S]+?)__/g, '<strong>$1</strong>');
     escaped = escaped.replace(/\*([\s\S]+?)\*/g, '<em>$1</em>');
     escaped = escaped.replace(/_([\s\S]+?)_/g, '<em>$1</em>');
 
-    // Blockquotes
+    // 8. Blockquotes
     escaped = escaped.replace(/^&gt; (.*?)$/gm, '<blockquote>$1</blockquote>');
 
-    // Lists
+    // 9. Lists
     escaped = escaped.replace(/^\s*[-*]\s+(.*?)$/gm, '<li>$1</li>');
     escaped = escaped.replace(/^\s*\d+\.\s+(.*?)$/gm, '<li class="ordered">$1</li>');
 
-    // Paragraphs and Newlines
+    // 10. Paragraphs and Newlines
     const lines = escaped.split(/\n{2,}/);
     const formattedParagraphs = lines.map(line => {
       line = line.trim();
       if (!line) return "";
       
-      if (line.startsWith("%%CODE_BLOCK_") || 
-          line.startsWith("%%LATEX_BLOCK_") || 
+      if (line.startsWith("%%CODEBLOCK") || 
+          line.startsWith("%%LATEXBLOCK") || 
+          line.startsWith("%%LATEXINLINE") || 
           line.startsWith("<h") || 
           line.startsWith("<blockquote") ||
           line.startsWith("<li")) {
@@ -2085,16 +2090,15 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
     
     escaped = formattedParagraphs.filter(Boolean).join("\n");
 
-    // Group adjacent list items
+    // 11. Group adjacent list items
     escaped = escaped.replace(/(<li>.*?<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
     escaped = escaped.replace(/(<li class="ordered">.*?<\/li>\n?)+/g, (match) => {
       const clean = match.replace(/ class="ordered"/g, '');
       return `<ol>${clean}</ol>`;
     });
 
-    // Re-insert Code Blocks with copy buttons
-    codeBlocks.forEach((item, index) => {
-      const placeholder = `%%CODE_BLOCK_${index}%%`;
+    // 12. Re-insert Code Blocks with copy buttons
+    codeBlocks.forEach((item) => {
       const cleanCode = item.code.trim();
       const codeHtml = `
         <div class="code-block-container">
@@ -2106,25 +2110,12 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           <pre class="code-block-content"><code>${cleanCode}</code></pre>
         </div>
       `;
-      escaped = escaped.replace(placeholder, () => codeHtml);
+      escaped = escaped.replace(item.id, () => codeHtml);
     });
 
-    // Re-insert LaTeX Blocks with serif equations
-    latexBlocks.forEach((formula, index) => {
-      const placeholder = `%%LATEX_BLOCK_${index}%%`;
-      const mathHtml = `
-        <div class="latex-block">
-          <div class="latex-formula">${renderLatexToHtml(formula, true)}</div>
-        </div>
-      `;
-      escaped = escaped.replace(placeholder, () => mathHtml);
-    });
-
-    // Re-insert LaTeX Inlines
-    latexInlines.forEach((formula, index) => {
-      const placeholder = `%%LATEX_INLINE_${index}%%`;
-      const mathHtml = `<span class="latex-inline">${renderLatexToHtml(formula, false)}</span>`;
-      escaped = escaped.replace(placeholder, () => mathHtml);
+    // 13. Re-insert LaTeX Blocks & Inlines
+    mathBlocks.forEach((block) => {
+      escaped = escaped.replace(block.id, () => block.rendered);
     });
 
     return escaped;
@@ -2146,6 +2137,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
       }
     }
 
+    // Fallback: Pure CSS and unicode rendering
     let html = formula;
 
     // Greek Alphabet and Common Math Symbols
@@ -2194,7 +2186,15 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
     html = html.replace(/\\right/g, '');
     html = html.replace(/\\/g, '');
 
-    return html;
+    if (isBlock) {
+      return `
+        <div class="latex-block">
+          <div class="latex-formula">${html}</div>
+        </div>
+      `;
+    } else {
+      return `<span class="latex-inline">${html}</span>`;
+    }
   }
 
   // Generates a high-quality, valid mock JPEG browser screenshot to feed into Gemini API vision encoder
