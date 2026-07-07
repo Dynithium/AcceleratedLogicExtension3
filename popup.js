@@ -1,4 +1,4 @@
-// Gemini Web Companion - Popup Controller
+// AcceleratedLogic AI - Popup Controller
 
 document.addEventListener("DOMContentLoaded", () => {
   // DOM Elements
@@ -2584,16 +2584,16 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
         if (name === "get_page_dom") {
           resolve({
             success: true,
-            title: "Simulated Web Companion Blog",
-            url: "https://ai.google.dev/blog/gemini-web-companion",
+            title: "AcceleratedLogic AI Blog",
+            url: "https://acceleratedlogic.ai/blog/launch",
             text: "This is a simulated DOM context content. Manifest V3 Side Panels and high-context models transform browsers into active runtime workspaces. This sidebar is fully context-aware. With a single click, users can capture the page DOM or query visual layouts directly."
           });
         } else if (name === "get_page_screenshot") {
           resolve({
             success: true,
             screenshot_url: generateMockScreenshot(
-              "Simulated Web Companion Blog",
-              "https://ai.google.dev/blog/gemini-web-companion",
+              "AcceleratedLogic AI Blog",
+              "https://acceleratedlogic.ai/blog/launch",
               "This is a simulated DOM context content. Manifest V3 Side Panels and high-context models transform browsers into active runtime workspaces. This sidebar is fully context-aware. With a single click, users can capture the page DOM or query visual layouts directly."
             )
           });
@@ -2814,7 +2814,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           resolve({
             success: true,
             tabs: [
-              { id: 1, title: "Gemini Web Companion", url: "https://gemini-extension-builder.ai.studio", active: true },
+              { id: 1, title: "AcceleratedLogic AI", url: "https://acceleratedlogic.ai", active: true },
               { id: 2, title: "Google Search - Gemini API Documentation", url: "https://www.google.com/search?q=gemini+api+documentation", active: false }
             ]
           });

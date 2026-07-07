@@ -29,7 +29,7 @@ import {
 // Code listings to display in the live Explorer
 const MANIFEST_CODE = `{
   "manifest_version": 3,
-  "name": "Gemini Web Companion",
+  "name": "AcceleratedLogic AI",
   "version": "1.0.0",
   "description": "Talk to Gemini models directly from your browser. Upload files, capture screenshots, and query current page DOM context.",
   "permissions": [
@@ -70,11 +70,11 @@ const MANIFEST_CODE = `{
 }
 `;
 
-const BACKGROUND_CODE = `// Gemini Web Companion - Background Script
+const BACKGROUND_CODE = `// AcceleratedLogic AI - Background Script
 // This background worker listens for installation events.
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log("Gemini Web Companion Chrome Extension installed successfully.");
+  console.log("AcceleratedLogic AI Chrome Extension installed successfully.");
 });
 
 // Enable opening the side panel on clicking the action icon
@@ -87,7 +87,7 @@ const POPUP_HTML_CODE = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Gemini Web Companion</title>
+  <title>AcceleratedLogic AI</title>
   <link rel="stylesheet" href="katex/katex.min.css">
   <link rel="stylesheet" href="popup.css">
 </head>
@@ -97,7 +97,7 @@ const POPUP_HTML_CODE = `<!DOCTYPE html>
     <header class="app-header">
       <div class="logo-area">
         <span class="sparkle-icon">✨</span>
-        <h1 class="title">Gemini Companion</h1>
+        <h1 class="title">AcceleratedLogic AI</h1>
       </div>
       <div class="header-actions">
         <button id="btn-chats" class="icon-button" title="Chats History">
@@ -196,7 +196,7 @@ const POPUP_HTML_CODE = `<!DOCTYPE html>
       <!-- Starter/Welcome Screen -->
       <div id="welcome-screen" class="welcome-screen">
         <div class="welcome-icon">💬</div>
-        <h2>Welcome to Gemini Companion</h2>
+        <h2>Welcome to AcceleratedLogic AI</h2>
         <p>Talk to Gemini directly from any browser tab! Capture screens, upload files, and chat seamlessly.</p>
         
         <div class="preset-suggestions">
@@ -282,7 +282,7 @@ const POPUP_HTML_CODE = `<!DOCTYPE html>
 </html>
 `;
 
-const POPUP_CSS_CODE = `/* Google Gemini Web Companion - Style Sheet */
+const POPUP_CSS_CODE = `/* AcceleratedLogic AI - Style Sheet */
 
 * {
   box-sizing: border-box;
@@ -1539,7 +1539,7 @@ body {
 
 `;
 
-const POPUP_JS_CODE = `// Gemini Web Companion - Popup Controller
+const POPUP_JS_CODE = `// AcceleratedLogic AI - Popup Controller
 
 document.addEventListener("DOMContentLoaded", () => {
   // DOM Elements
@@ -4125,16 +4125,16 @@ CRITICAL RULES:
         if (name === "get_page_dom") {
           resolve({
             success: true,
-            title: "Simulated Web Companion Blog",
-            url: "https://ai.google.dev/blog/gemini-web-companion",
+            title: "AcceleratedLogic AI Blog",
+            url: "https://acceleratedlogic.ai/blog/launch",
             text: "This is a simulated DOM context content. Manifest V3 Side Panels and high-context models transform browsers into active runtime workspaces. This sidebar is fully context-aware. With a single click, users can capture the page DOM or query visual layouts directly."
           });
         } else if (name === "get_page_screenshot") {
           resolve({
             success: true,
             screenshot_url: generateMockScreenshot(
-              "Simulated Web Companion Blog",
-              "https://ai.google.dev/blog/gemini-web-companion",
+              "AcceleratedLogic AI Blog",
+              "https://acceleratedlogic.ai/blog/launch",
               "This is a simulated DOM context content. Manifest V3 Side Panels and high-context models transform browsers into active runtime workspaces. This sidebar is fully context-aware. With a single click, users can capture the page DOM or query visual layouts directly."
             )
           });
@@ -4355,7 +4355,7 @@ CRITICAL RULES:
           resolve({
             success: true,
             tabs: [
-              { id: 1, title: "Gemini Web Companion", url: "https://gemini-extension-builder.ai.studio", active: true },
+              { id: 1, title: "AcceleratedLogic AI", url: "https://acceleratedlogic.ai", active: true },
               { id: 2, title: "Google Search - Gemini API Documentation", url: "https://www.google.com/search?q=gemini+api+documentation", active: false }
             ]
           });
@@ -8641,7 +8641,7 @@ This simulator mimics the exact behavior of the Chrome Extension you will load. 
                 <div className="relative">
                   <button 
                     className="p-1 bg-gradient-to-r from-blue-500/10 to-violet-500/10 border border-blue-500/30 rounded text-blue-400 hover:text-blue-300 transition animate-pulse cursor-pointer flex items-center justify-center"
-                    title="Open Gemini Companion Side Panel"
+                    title="Open AcceleratedLogic AI Side Panel"
                   >
                     <Sparkles className="w-3 h-3" />
                   </button>
@@ -8705,7 +8705,7 @@ This simulator mimics the exact behavior of the Chrome Extension you will load. 
                 <header className="flex justify-between items-center px-3.5 py-2.5 bg-slate-800 border-b border-slate-700/60 shrink-0 select-none">
                   <div className="flex items-center gap-1.5">
                     <span className="text-blue-400 text-xs">✨</span>
-                    <span className="text-[11px] font-semibold text-slate-200">Gemini Companion Side Panel</span>
+                    <span className="text-[11px] font-semibold text-slate-200">AcceleratedLogic AI Side Panel</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <button

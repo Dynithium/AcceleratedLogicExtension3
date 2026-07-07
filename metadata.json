@@ -1,5 +1,5 @@
 {
-  "name": "Gemini Extension Builder",
+  "name": "AcceleratedLogic AI",
   "description": "Create, customize, and download a ready-to-use Chrome extension for talking to Gemini models, featuring screenshot capture, page DOM analysis, and file uploads.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

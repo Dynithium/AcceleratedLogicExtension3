@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Gemini Web Companion",
+  "name": "AcceleratedLogic AI",
   "version": "1.0.0",
   "description": "Talk to Gemini models directly from your browser. Upload files, capture screenshots, and query current page DOM context.",
   "permissions": [
