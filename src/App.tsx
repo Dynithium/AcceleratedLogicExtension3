@@ -78,6 +78,7 @@ const POPUP_HTML_CODE = `<!DOCTYPE html>
 <head>
   <meta charset="utf-8">
   <title>Gemini Web Companion</title>
+  <link rel="stylesheet" href="katex/katex.min.css">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -265,6 +266,7 @@ const POPUP_HTML_CODE = `<!DOCTYPE html>
     </div>
   </div>
 
+  <script src="katex/katex.min.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
@@ -3643,7 +3645,7 @@ CRITICAL RULES:
       const placeholder = \`%%LATEX_BLOCK_\${index}%%\`;
       const mathHtml = \`
         <div class="latex-block">
-          <div class="latex-formula">\${renderLatexToHtml(formula)}</div>
+          <div class="latex-formula">\${renderLatexToHtml(formula, true)}</div>
         </div>
       \`;
       escaped = escaped.replace(placeholder, () => mathHtml);
@@ -3652,16 +3654,29 @@ CRITICAL RULES:
     // Re-insert LaTeX Inlines
     latexInlines.forEach((formula, index) => {
       const placeholder = \`%%LATEX_INLINE_\${index}%%\`;
-      const mathHtml = \`<span class="latex-inline">\${renderLatexToHtml(formula)}</span>\`;
+      const mathHtml = \`<span class="latex-inline">\${renderLatexToHtml(formula, false)}</span>\`;
       escaped = escaped.replace(placeholder, () => mathHtml);
     });
 
     return escaped;
   }
 
-  // Unicode LaTeX math parser
-  function renderLatexToHtml(formula) {
+  // Unicode LaTeX math parser with KaTeX fallback
+  function renderLatexToHtml(formula, isBlock = false) {
     if (!formula) return "";
+
+    // Attempt KaTeX first
+    if (typeof katex !== 'undefined' && katex.renderToString) {
+      try {
+        return katex.renderToString(formula, {
+          displayMode: isBlock,
+          throwOnError: false
+        });
+      } catch (e) {
+        console.warn("KaTeX rendering failed, falling back to basic parser", e);
+      }
+    }
+
     let html = formula;
 
     // Greek Alphabet and Common Math Symbols
