@@ -2424,6 +2424,93 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function detectPseudoToolCall(text) {
+    if (!text) return null;
+
+    const knownToolsMap = {
+      "get_page_dom": "get_page_dom",
+      "getpagedom": "get_page_dom",
+      "getpage_dom": "get_page_dom",
+      "get_page_screenshot": "get_page_screenshot",
+      "getpagescreenshot": "get_page_screenshot",
+      "getpage_screenshot": "get_page_screenshot",
+      "click_element": "click_element",
+      "clickelement": "click_element",
+      "click_at_coordinate": "click_at_coordinate",
+      "clickatcoordinate": "click_at_coordinate",
+      "type_text": "type_text",
+      "typetext": "type_text",
+      "scroll_page": "scroll_page",
+      "scrollpage": "scroll_page",
+      "wait": "wait",
+      "open_tab": "open_tab",
+      "opentab": "open_tab",
+      "search_web": "search_web",
+      "searchweb": "search_web",
+      "list_tabs": "list_tabs",
+      "listtabs": "list_tabs",
+      "switch_tab": "switch_tab",
+      "switchtab": "switch_tab",
+      "press_key": "press_key",
+      "presskey": "press_key",
+      "select_text": "select_text",
+      "selecttext": "select_text",
+      "replace_text": "replace_text",
+      "replacetext": "replace_text",
+      "extract_links": "extract_links",
+      "extractlinks": "extract_links",
+      "execute_script": "execute_script",
+      "executescript": "execute_script",
+      "go_back_forward": "go_back_forward",
+      "gobackforward": "go_back_forward",
+      "get_element_details": "get_element_details",
+      "getelementdetails": "get_element_details"
+    };
+
+    const regex = /(?:call:)?(?:default_?api:)?([a-zA-Z0-9_]+)\\s*(\\([^{}]*\\)|\\{[^}]*\\}|)/gi;
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+      const rawMatch = match[0];
+      const rawName = match[1].toLowerCase().trim();
+      const mappedName = knownToolsMap[rawName];
+
+      if (mappedName) {
+        let rawArgs = match[2] || "{}";
+        rawArgs = rawArgs.trim();
+        if (rawArgs.startsWith("(") && rawArgs.endsWith(")")) {
+          rawArgs = rawArgs.slice(1, -1).trim();
+        }
+        if (!rawArgs || rawArgs === "()") rawArgs = "{}";
+
+        let parsedArgs = {};
+        try {
+          parsedArgs = JSON.parse(rawArgs);
+        } catch (e) {
+          parsedArgs = {};
+        }
+
+        return {
+          fullMatch: rawMatch,
+          name: mappedName,
+          args: parsedArgs
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function cleanPseudoStrings(text) {
+    if (!text) return text;
+    return text
+      .replace(/(?:call:)?(?:default_?api:)[a-zA-Z0-9_]*\\s*(\\([^{}]*\\)|\\{[^}]*\\}|)/gi, "")
+      .replace(/(?:call:)?(?:default_?api:)?(?:get_?page_?dom|get_?page_?screenshot|click_?element|click_?at_?coordinate|type_?text|scroll_?page|wait|open_?tab|search_?web|list_?tabs|switch_?tab|press_?key|select_?text|replace_?text|extract_?links|execute_?script|go_?back_?forward|get_?element_?details)\\s*(\\([^{}]*\\)|\\{[^}]*\\}|)/gi, "")
+      .replace(/call:[a-zA-Z0-9_]+\\s*(\\([^{}]*\\)|\\{[^}]*\\}|)/gi, "")
+      .replace(/<thinking>\\s*<\\/thinking>/gi, "")
+      .trim();
+  }
+
   async function sendMessage() {
     if (isGenerating) {
       if (currentAbortController) {
@@ -3005,6 +3092,29 @@ CRITICAL RULES:
                 }
               }
             ];
+          } else if (accumulatedText) {
+            const pseudoCall = detectPseudoToolCall(accumulatedText);
+            if (pseudoCall) {
+              activeFunctionCall = {
+                name: pseudoCall.name,
+                args: pseudoCall.args
+              };
+              accumulatedText = accumulatedText.replace(pseudoCall.fullMatch, '').trim();
+              updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
+
+              rawModelParts = [];
+              if (accumulatedText) {
+                rawModelParts.push({ text: accumulatedText });
+              }
+              rawModelParts.push({
+                functionCall: {
+                  name: pseudoCall.name,
+                  args: pseudoCall.args
+                }
+              });
+            } else {
+              rawModelParts = [{ text: accumulatedText }];
+            }
           } else {
             rawModelParts = [{ text: accumulatedText }];
           }
@@ -3440,6 +3550,29 @@ CRITICAL RULES:
             accumulatedText += "</thinking>";
             inThinkingBlock = false;
             updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
+          }
+        }
+
+        if (!activeFunctionCall && accumulatedText) {
+          const pseudoCall = detectPseudoToolCall(accumulatedText);
+          if (pseudoCall) {
+            activeFunctionCall = {
+              name: pseudoCall.name,
+              args: pseudoCall.args
+            };
+            accumulatedText = accumulatedText.replace(pseudoCall.fullMatch, '').trim();
+            updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
+
+            rawModelParts = [];
+            if (accumulatedText) {
+              rawModelParts.push({ text: accumulatedText });
+            }
+            rawModelParts.push({
+              functionCall: {
+                name: pseudoCall.name,
+                args: pseudoCall.args
+              }
+            });
           }
         }
 
@@ -6194,6 +6327,7 @@ CRITICAL RULES:
 
   // Parses thinking blocks out of the text content
   function parseThinkingAndContent(text) {
+    text = cleanPseudoStrings(text);
     text = preprocessThinkingTags(text);
     const thinkingParts = [];
     let content = "";
@@ -6812,8 +6946,19 @@ function preprocessThinkingTags(text: string): string {
   return text;
 }
 
+function cleanPseudoStrings(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(/(?:call:)?(?:default_?api:)[a-zA-Z0-9_]*\s*(\([^{}]*\)|\{[^}]*\}|)/gi, "")
+    .replace(/(?:call:)?(?:default_?api:)?(?:get_?page_?dom|get_?page_?screenshot|click_?element|click_?at_?coordinate|type_?text|scroll_?page|wait|open_?tab|search_?web|list_?tabs|switch_?tab|press_?key|select_?text|replace_?text|extract_?links|execute_?script|go_?back_?forward|get_?element_?details)\s*(\([^{}]*\)|\{[^}]*\}|)/gi, "")
+    .replace(/call:[a-zA-Z0-9_]+\s*(\([^{}]*\)|\{[^}]*\}|)/gi, "")
+    .replace(/<thinking>\s*<\/thinking>/gi, "")
+    .trim();
+}
+
 // Parses thinking blocks out of the text content inside React
 function parseThinkingAndContent(text: string) {
+  text = cleanPseudoStrings(text);
   text = preprocessThinkingTags(text);
   const thinkingParts: string[] = [];
   let content = "";
