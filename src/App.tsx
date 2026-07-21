@@ -2521,41 +2521,13 @@ document.addEventListener("DOMContentLoaded", () => {
       (msg.parts || []).forEach(part => {
         if (!part) return;
 
-        if (part.functionCall && part.functionCall.name) {
-          let argsObj = {};
-          if (part.functionCall.args && typeof part.functionCall.args === 'object') {
-            try {
-              argsObj = JSON.parse(JSON.stringify(part.functionCall.args));
-            } catch (e) {
-              argsObj = {};
-            }
-          }
-          validParts.push({
-            functionCall: {
-              name: String(part.functionCall.name),
-              args: argsObj
-            }
-          });
+        if (part.functionCall) {
+          validParts.push(part);
           return;
         }
 
-        if (part.functionResponse && part.functionResponse.name) {
-          let cleanResp = {};
-          if (part.functionResponse.response && typeof part.functionResponse.response === 'object') {
-            try {
-              cleanResp = JSON.parse(JSON.stringify(part.functionResponse.response));
-            } catch (e) {
-              cleanResp = { result: String(part.functionResponse.response) };
-            }
-          } else {
-            cleanResp = { result: String(part.functionResponse.response || "") };
-          }
-          validParts.push({
-            functionResponse: {
-              name: String(part.functionResponse.name),
-              response: cleanResp
-            }
-          });
+        if (part.functionResponse) {
+          validParts.push(part);
           return;
         }
 
@@ -2563,12 +2535,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (isPastTurn) {
             validParts.push({ text: \`[Attachment (\${part.inlineData.mimeType}) analyzed in previous turn]\` });
           } else {
-            validParts.push({
-              inlineData: {
-                mimeType: String(part.inlineData.mimeType),
-                data: String(part.inlineData.data)
-              }
-            });
+            validParts.push(part);
           }
           return;
         }
@@ -2576,23 +2543,27 @@ document.addEventListener("DOMContentLoaded", () => {
         if (typeof part.text === 'string') {
           const cleanedText = cleanPseudoStrings(part.text);
           if (cleanedText && cleanedText.trim()) {
-            validParts.push({ text: cleanedText });
+            validParts.push({ ...part, text: cleanedText });
           }
           return;
         }
+        
+        // Pass through anything else (like executableCode, etc)
+        validParts.push(part);
       });
 
       if (validParts.length > 0) {
-        let finalParts = validParts;
-        if (msg.role === 'model') {
-          const fnCallPart = validParts.find(p => p.functionCall);
-          if (fnCallPart) {
-            finalParts = [fnCallPart];
-          }
+      let finalParts = validParts;
+      if (msg.role === 'model') {
+        const fnCalls = validParts.filter(p => p.functionCall);
+        if (fnCalls.length > 1) {
+          // Keep text parts and ONLY the FIRST function call
+          finalParts = validParts.filter(p => !p.functionCall || p === fnCalls[0]);
         }
-        cleanHistory.push({
+      }
+      cleanHistory.push({
           role: msg.role === 'model' ? 'model' : 'user',
-          parts: finalParts
+          parts: validParts
         });
       }
     });
@@ -3108,7 +3079,7 @@ CRITICAL RULES:
 
           if (!response.ok) {
             const errJson = await response.json();
-            throw new Error(errJson.error?.message || \`API Error: \${response.status}\`);
+            throw new Error(errJson.error?.message || errJson.error?.error?.message || errJson.message || (Object.keys(errJson).length ? JSON.stringify(errJson) : \`API Error: \${response.status}\`));
           }
 
           if (!response.body) {
@@ -3528,7 +3499,7 @@ CRITICAL RULES:
 
           if (!response.ok) {
             const errJson = await response.json();
-            throw new Error(errJson.error?.message || \`API Error: \${response.status}\`);
+            throw new Error(errJson.error?.message || errJson.error?.error?.message || errJson.message || (Object.keys(errJson).length ? JSON.stringify(errJson) : \`API Error: \${response.status}\`));
           }
 
           if (!response.body) {
@@ -3729,15 +3700,10 @@ CRITICAL RULES:
           }
           scrollToBottom();
 
-          // 1. Add model's functionCall to chat history (must be standalone functionCall part in Gemini API)
+          // 1. Add model's functionCall to chat history (preserving generated thoughts/text and signatures)
           chatHistory.push({
             role: "model",
-            parts: [{
-              functionCall: {
-                name: activeFunctionCall.name,
-                args: activeFunctionCall.args || {}
-              }
-            }]
+            parts: rawModelParts
           });
 
           // 2. Execute the tool
@@ -7060,41 +7026,13 @@ function sanitizeHistory(history: any[]) {
     (msg.parts || []).forEach((part: any) => {
       if (!part) return;
 
-      if (part.functionCall && part.functionCall.name) {
-        let argsObj = {};
-        if (part.functionCall.args && typeof part.functionCall.args === 'object') {
-          try {
-            argsObj = JSON.parse(JSON.stringify(part.functionCall.args));
-          } catch (e) {
-            argsObj = {};
-          }
-        }
-        validParts.push({
-          functionCall: {
-            name: String(part.functionCall.name),
-            args: argsObj
-          }
-        });
+      if (part.functionCall) {
+        validParts.push(part);
         return;
       }
 
-      if (part.functionResponse && part.functionResponse.name) {
-        let cleanResp = {};
-        if (part.functionResponse.response && typeof part.functionResponse.response === 'object') {
-          try {
-            cleanResp = JSON.parse(JSON.stringify(part.functionResponse.response));
-          } catch (e) {
-            cleanResp = { result: String(part.functionResponse.response) };
-          }
-        } else {
-          cleanResp = { result: String(part.functionResponse.response || "") };
-        }
-        validParts.push({
-          functionResponse: {
-            name: String(part.functionResponse.name),
-            response: cleanResp
-          }
-        });
+      if (part.functionResponse) {
+        validParts.push(part);
         return;
       }
 
@@ -7102,12 +7040,7 @@ function sanitizeHistory(history: any[]) {
         if (isPastTurn) {
           validParts.push({ text: `[Attachment (${part.inlineData.mimeType}) analyzed in previous turn]` });
         } else {
-          validParts.push({
-            inlineData: {
-              mimeType: String(part.inlineData.mimeType),
-              data: String(part.inlineData.data)
-            }
-          });
+          validParts.push(part);
         }
         return;
       }
@@ -7115,23 +7048,27 @@ function sanitizeHistory(history: any[]) {
       if (typeof part.text === 'string') {
         const cleanedText = cleanPseudoStrings(part.text);
         if (cleanedText && cleanedText.trim()) {
-          validParts.push({ text: cleanedText });
+          validParts.push({ ...part, text: cleanedText });
         }
         return;
       }
+      
+      // Pass through anything else (like executableCode, etc)
+      validParts.push(part);
     });
 
     if (validParts.length > 0) {
       let finalParts = validParts;
       if (msg.role === 'model') {
-        const fnCallPart = validParts.find(p => p.functionCall);
-        if (fnCallPart) {
-          finalParts = [fnCallPart];
+        const fnCalls = validParts.filter(p => p.functionCall);
+        if (fnCalls.length > 1) {
+          // Keep text parts and ONLY the FIRST function call
+          finalParts = validParts.filter(p => !p.functionCall || p === fnCalls[0]);
         }
       }
       cleanHistory.push({
         role: msg.role === 'model' ? 'model' : 'user',
-        parts: finalParts
+        parts: validParts
       });
     }
   });
@@ -8496,15 +8433,10 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             }
             hasMoreTurns = true;
 
-            // 1. Save model function call to local history (must be standalone functionCall part in Gemini API)
+            // 1. Save model function call to local history (preserving generated thoughts/text and signatures)
             localHistory.push({
               role: "model",
-              parts: [{
-                functionCall: {
-                  name: activeFunctionCall.name,
-                  args: activeFunctionCall.args || {}
-                }
-              }]
+              parts: rawModelParts
             });
 
             // 2. Execute tool inside simulator
