@@ -1127,6 +1127,46 @@ body {
   border-radius: 0 6px 6px 0;
 }
 
+/* Modern Dark-Themed Markdown Tables */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  margin: 12px 0;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background-color: #0b111e;
+}
+
+.table-container table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.825rem;
+  text-align: left;
+}
+
+.table-container th {
+  background-color: #1e293b;
+  color: #f8fafc;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 2px solid #334155;
+  white-space: nowrap;
+}
+
+.table-container td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #1e293b;
+  color: #cbd5e1;
+}
+
+.table-container tr:last-child td {
+  border-bottom: none;
+}
+
+.table-container tr:hover td {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
 .inline-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.775rem;
@@ -1693,7 +1733,6 @@ document.addEventListener("DOMContentLoaded", () => {
       // Multiple Chats Integration
       if (result.chats && result.chats.length > 0) {
         chats = result.chats;
-        activeChatId = result.activeChatId || chats[0].id;
       } else if (result.chatHistory && result.chatHistory.length > 0) {
         const firstUser = result.chatHistory.find(m => m.role === 'user');
         let initialTitle = "Migrated Chat";
@@ -1706,18 +1745,26 @@ document.addEventListener("DOMContentLoaded", () => {
           history: result.chatHistory
         };
         chats = [migrated];
-        activeChatId = migrated.id;
-        chrome.storage.local.set({ chats: chats, activeChatId: activeChatId });
+      } else {
+        chats = [];
+      }
+
+      // Every time the extension opens, ensure the active chat is a brand-new empty chat.
+      // If the most recent chat in the history is already completely empty, we can reuse it.
+      // Otherwise, we create and prepend a brand new empty chat.
+      const hasEmptyMostRecent = chats.length > 0 && (!chats[0].history || chats[0].history.length === 0);
+      if (hasEmptyMostRecent) {
+        activeChatId = chats[0].id;
       } else {
         const initial = {
           id: "chat-" + Date.now(),
           title: "New Chat",
           history: []
         };
-        chats = [initial];
+        chats.unshift(initial);
         activeChatId = initial.id;
-        chrome.storage.local.set({ chats: chats, activeChatId: activeChatId });
       }
+      chrome.storage.local.set({ chats: chats, activeChatId: activeChatId });
 
       const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
       if (activeChat) {
@@ -2377,6 +2424,78 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function detectPseudoToolCall(text) {
+    if (!text) return null;
+
+    const knownToolsMap = {
+      "get_page_dom": "get_page_dom",
+      "getpagedom": "get_page_dom",
+      "getpage_dom": "get_page_dom",
+      "get_page_screenshot": "get_page_screenshot",
+      "getpagescreenshot": "get_page_screenshot",
+      "getpage_screenshot": "get_page_screenshot",
+      "click_element": "click_element",
+      "clickelement": "click_element",
+      "click_at_coordinate": "click_at_coordinate",
+      "clickatcoordinate": "click_at_coordinate",
+      "type_text": "type_text",
+      "typetext": "type_text",
+      "scroll_page": "scroll_page",
+      "scrollpage": "scroll_page",
+      "wait": "wait",
+      "open_tab": "open_tab",
+      "opentab": "open_tab",
+      "search_web": "search_web",
+      "searchweb": "search_web",
+      "list_tabs": "list_tabs",
+      "listtabs": "list_tabs",
+      "switch_tab": "switch_tab",
+      "switchtab": "switch_tab",
+      "press_key": "press_key",
+      "presskey": "press_key",
+      "select_text": "select_text",
+      "selecttext": "select_text",
+      "replace_text": "replace_text",
+      "replacetext": "replace_text"
+    };
+
+    const regex = /(?:call:)?(?:default_?api:)?([a_zA_Z0-9_]+)\\s*(\\([^{}]*\\)|\\{[^}]*\\}|)/gi;
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+      const rawMatch = match[0];
+      const rawName = match[1].toLowerCase().trim();
+      const mappedName = knownToolsMap[rawName];
+
+      if (mappedName) {
+        const isExplicitCall = /call:|default_?api:/i.test(rawMatch) || /\\(|\\{|\\}/.test(rawMatch);
+        if (isExplicitCall) {
+          let rawArgs = match[2] || "{}";
+          rawArgs = rawArgs.trim();
+          if (rawArgs.startsWith("(") && rawArgs.endsWith(")")) {
+            rawArgs = rawArgs.slice(1, -1).trim();
+          }
+          if (!rawArgs || rawArgs === "()") rawArgs = "{}";
+
+          let parsedArgs = {};
+          try {
+            parsedArgs = JSON.parse(rawArgs);
+          } catch (e) {
+            parsedArgs = {};
+          }
+
+          return {
+            fullMatch: rawMatch,
+            name: mappedName,
+            args: parsedArgs
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+
   async function sendMessage() {
     if (isGenerating) {
       if (currentAbortController) {
@@ -2534,6 +2653,7 @@ You help users analyze web pages, answer questions, and perform research.
 You can call 'get_page_dom' to get webpage text\${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, 'search_web' to perform search queries, 'list_tabs' to list open tabs, 'switch_tab' to switch between tabs, 'press_key' to simulate pressing keys on the webpage, 'select_text' to select/highlight text, and 'replace_text' to replace text.
 
 CRITICAL RULES:
+- NATIVE TOOL CALLING: You MUST invoke tools strictly using native function declarations. NEVER output tool calls as raw text, pseudo-code strings, or text fragments like 'call:default_api:...', 'call:get_page_dom', or 'get_page_dom{}'.
 - Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.
 - Never output raw base64 data, gibberish strings, or repeating binary characters.
 - PAGE ANALYSIS RULE: When you open a page or perform a search, you MUST NOT just report that the page/search is opened. You MUST immediately proceed to call 'get_page_dom' (or 'get_page_screenshot') to read, analyze, and comprehend its actual content before moving on or concluding, unless the user explicitly said they only wanted to open the page.
@@ -2900,6 +3020,29 @@ CRITICAL RULES:
                 }
               }
             ];
+          } else if (accumulatedText) {
+            const pseudoCall = detectPseudoToolCall(accumulatedText);
+            if (pseudoCall) {
+              activeFunctionCall = {
+                name: pseudoCall.name,
+                args: pseudoCall.args
+              };
+              accumulatedText = accumulatedText.replace(pseudoCall.fullMatch, '').trim();
+              updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
+
+              rawModelParts = [];
+              if (accumulatedText) {
+                rawModelParts.push({ text: accumulatedText });
+              }
+              rawModelParts.push({
+                functionCall: {
+                  name: pseudoCall.name,
+                  args: pseudoCall.args
+                }
+              });
+            } else {
+              rawModelParts = [{ text: accumulatedText }];
+            }
           } else {
             rawModelParts = [{ text: accumulatedText }];
           }
@@ -3293,6 +3436,29 @@ CRITICAL RULES:
           }
         }
 
+        if (!activeFunctionCall && accumulatedText) {
+          const pseudoCall = detectPseudoToolCall(accumulatedText);
+          if (pseudoCall) {
+            activeFunctionCall = {
+              name: pseudoCall.name,
+              args: pseudoCall.args
+            };
+            accumulatedText = accumulatedText.replace(pseudoCall.fullMatch, '').trim();
+            updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
+
+            rawModelParts = [];
+            if (accumulatedText) {
+              rawModelParts.push({ text: accumulatedText });
+            }
+            rawModelParts.push({
+              functionCall: {
+                name: pseudoCall.name,
+                args: pseudoCall.args
+              }
+            });
+          }
+        }
+
         if (activeFunctionCall) {
           // Model requested a tool execution! We set hasMoreTurns to true to send the response back
           hasMoreTurns = true;
@@ -3541,7 +3707,10 @@ CRITICAL RULES:
     const mathBlocks = [];
     let processedText = text;
 
-    // 1. Extract Display Math: $ ... $ or \\[ ... \\]
+    // Clean up any remaining pseudo tool call raw strings (like call:defaultapi:getpage_dom{}) from display
+    processedText = processedText.replace(/(?:call:)?(?:default_?api:)?(?:get_?page_?dom|get_?page_?screenshot|click_?element|click_?at_?coordinate|type_?text|scroll_?page|wait|open_?tab|search_?web|list_?tabs|switch_?tab|press_?key|select_?text|replace_?text)\\s*(\\([^{}]*\\)|\\{[^}]*\\}|)/gi, "").trim();
+
+    // 1. Extract Display Math: $$ ... $$ or \\[ ... \\]
     processedText = processedText.replace(/\\$\\$([\\s\\S]+?)\\$\\$/g, (match, formula) => {
       const id = \`%%LATEXBLOCK\${mathBlocks.length}%%\`;
       const rendered = renderLatexToHtml(formula.trim(), true);
@@ -3611,6 +3780,95 @@ CRITICAL RULES:
     escaped = escaped.replace(/^\\s*[-*]\\s+(.*?)$/gm, '<li>$1</li>');
     escaped = escaped.replace(/^\\s*\\d+\\.\\s+(.*?)$/gm, '<li class="ordered">$1</li>');
 
+    // 9.5 Parse Tables
+    const linesArr = escaped.split(/\\r?\\n/);
+    const newLines = [];
+    let inTable = false;
+    let tableHeader = null;
+    let tableAlignments = [];
+    let tableRows = [];
+
+    function isTableLine(l) {
+      const trimmed = l.trim();
+      return trimmed.startsWith('|') && trimmed.endsWith('|');
+    }
+
+    function isSeparatorLine(l) {
+      const trimmed = l.trim();
+      if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) return false;
+      const cleaned = trimmed.replace(/[|:\\s-]/g, '');
+      return cleaned === '' && trimmed.includes('-');
+    }
+
+    function renderTableHtml(header, alignments, rows) {
+      let html = '<div class="table-container"><table>';
+      html += '<thead><tr>';
+      header.forEach((cell, idx) => {
+        const align = alignments[idx] ? \` style="text-align: \${alignments[idx]}"\` : '';
+        html += \`<th\${align}>\${cell}</th>\`;
+      });
+      html += '</tr></thead>';
+      html += '<tbody>';
+      rows.forEach(row => {
+        html += '<tr>';
+        for (let idx = 0; idx < header.length; idx++) {
+          const cell = row[idx] || '';
+          const align = alignments[idx] ? \` style="text-align: \${alignments[idx]}"\` : '';
+          html += \`<td\${align}>\${cell}</td>\`;
+        }
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+      return html;
+    }
+
+    for (let i = 0; i < linesArr.length; i++) {
+      const line = linesArr[i];
+      if (isTableLine(line)) {
+        if (!inTable) {
+          let hasSeparator = false;
+          if (i + 1 < linesArr.length && isTableLine(linesArr[i + 1]) && isSeparatorLine(linesArr[i + 1])) {
+            hasSeparator = true;
+          }
+          if (hasSeparator) {
+            inTable = true;
+            const cells = line.trim().slice(1, -1).split('|').map(c => c.trim());
+            tableHeader = cells;
+            const separatorLine = linesArr[i + 1];
+            const sepCells = separatorLine.trim().slice(1, -1).split('|').map(c => c.trim());
+            tableAlignments = sepCells.map(cell => {
+              const left = cell.startsWith(':');
+              const right = cell.endsWith(':');
+              if (left && right) return 'center';
+              if (right) return 'right';
+              if (left) return 'left';
+              return '';
+            });
+            tableRows = [];
+            i++; // skip separator
+          } else {
+            newLines.push(line);
+          }
+        } else {
+          const cells = line.trim().slice(1, -1).split('|').map(c => c.trim());
+          tableRows.push(cells);
+        }
+      } else {
+        if (inTable) {
+          newLines.push(renderTableHtml(tableHeader, tableAlignments, tableRows));
+          inTable = false;
+          tableHeader = null;
+          tableAlignments = [];
+          tableRows = [];
+        }
+        newLines.push(line);
+      }
+    }
+    if (inTable) {
+      newLines.push(renderTableHtml(tableHeader, tableAlignments, tableRows));
+    }
+    escaped = newLines.join('\\n');
+
     // 10. Paragraphs and Newlines
     const lines = escaped.split(/\\n{2,}/);
     const formattedParagraphs = lines.map(line => {
@@ -3622,7 +3880,8 @@ CRITICAL RULES:
           line.startsWith("%%LATEXINLINE") || 
           line.startsWith("<h") || 
           line.startsWith("<blockquote") ||
-          line.startsWith("<li")) {
+          line.startsWith("<li") ||
+          line.startsWith("<div class=\\"table-container\\"")) {
         return line;
       }
       
@@ -6636,6 +6895,38 @@ export default function App() {
   const [simChatsOpen, setSimChatsOpen] = useState<boolean>(false);
   const [simTabPickerOpen, setSimTabPickerOpen] = useState<boolean>(false);
 
+  // Every time the application mounts, make sure we have a brand new empty chat (or reuse an existing empty one at the top)
+  useEffect(() => {
+    let currentChats = [...simChats];
+    
+    // Check if the first chat is completely empty or just holds the initial greeting message without any user input yet
+    const firstIsEmpty = currentChats.length > 0 && 
+      (!currentChats[0].messages || currentChats[0].messages.length === 0 || 
+       (currentChats[0].messages.length === 1 && currentChats[0].messages[0].id === 1));
+       
+    if (firstIsEmpty) {
+      setSimActiveChatId(currentChats[0].id);
+    } else {
+      const newChatId = "sim-chat-" + Date.now();
+      const newChat = {
+        id: newChatId,
+        title: "New Chat",
+        messages: [
+          {
+            id: 1,
+            role: "assistant",
+            text: "Hello! Paste your Gemini API key in the settings (⚙️) above to start. You can type prompts, upload files, or simulate taking page captures of this builder app!",
+          }
+        ]
+      };
+      const updatedChats = [newChat, ...currentChats];
+      setSimChats(updatedChats);
+      setSimActiveChatId(newChatId);
+      localStorage.setItem("simChats", JSON.stringify(updatedChats));
+      localStorage.setItem("simActiveChatId", newChatId);
+    }
+  }, []);
+
   // Derive simMessages and activeSimTab
   const activeSimChat = simChats.find(c => c.id === simActiveChatId) || simChats[0];
   const simMessages = activeSimChat ? activeSimChat.messages : [];
@@ -6993,12 +7284,85 @@ export default function App() {
           let buffer = "";
           let inThinkingBlock = false;
 
+          const detectPseudoToolCall = (text: string) => {
+            if (!text) return null;
+
+            const knownToolsMap: Record<string, string> = {
+              "get_page_dom": "get_page_dom",
+              "getpagedom": "get_page_dom",
+              "getpage_dom": "get_page_dom",
+              "get_page_screenshot": "get_page_screenshot",
+              "getpagescreenshot": "get_page_screenshot",
+              "getpage_screenshot": "get_page_screenshot",
+              "click_element": "click_element",
+              "clickelement": "click_element",
+              "click_at_coordinate": "click_at_coordinate",
+              "clickatcoordinate": "click_at_coordinate",
+              "type_text": "type_text",
+              "typetext": "type_text",
+              "scroll_page": "scroll_page",
+              "scrollpage": "scroll_page",
+              "wait": "wait",
+              "open_tab": "open_tab",
+              "opentab": "open_tab",
+              "search_web": "search_web",
+              "searchweb": "search_web",
+              "list_tabs": "list_tabs",
+              "listtabs": "list_tabs",
+              "switch_tab": "switch_tab",
+              "switchtab": "switch_tab",
+              "press_key": "press_key",
+              "presskey": "press_key",
+              "select_text": "select_text",
+              "selecttext": "select_text",
+              "replace_text": "replace_text",
+              "replacetext": "replace_text"
+            };
+
+            const regex = /(?:call:)?(?:default_?api:)?([a_zA_Z0-9_]+)\s*(\([^{}]*\)|\{[^}]*\}|)/gi;
+            let match;
+
+            while ((match = regex.exec(text)) !== null) {
+              const rawMatch = match[0];
+              const rawName = match[1].toLowerCase().trim();
+              const mappedName = knownToolsMap[rawName];
+
+              if (mappedName) {
+                const isExplicitCall = /call:|default_?api:/i.test(rawMatch) || /\(|\{|\}/.test(rawMatch);
+                if (isExplicitCall) {
+                  let rawArgs = match[2] || "{}";
+                  rawArgs = rawArgs.trim();
+                  if (rawArgs.startsWith("(") && rawArgs.endsWith(")")) {
+                    rawArgs = rawArgs.slice(1, -1).trim();
+                  }
+                  if (!rawArgs || rawArgs === "()") rawArgs = "{}";
+
+                  let parsedArgs = {};
+                  try {
+                    parsedArgs = JSON.parse(rawArgs);
+                  } catch (e) {
+                    parsedArgs = {};
+                  }
+
+                  return {
+                    fullMatch: rawMatch,
+                    name: mappedName,
+                    args: parsedArgs
+                  };
+                }
+              }
+            }
+
+            return null;
+          };
+
           const isVisionCapable = simProvider === "gemini" || !!simOpenaiCapabilities?.vision;
           const systemInstructionText = `You are AcceleratedLogic, an advanced browser assistant Chrome Extension.
 You help users analyze web pages, answer questions, and perform research.
 You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, 'search_web' to perform search queries, 'list_tabs' to list open tabs, 'switch_tab' to switch between tabs, 'press_key' to simulate pressing keys on the webpage, 'select_text' to select/highlight text, and 'replace_text' to replace text.
 
 CRITICAL RULES:
+- NATIVE TOOL CALLING: You MUST invoke tools strictly using native function declarations. NEVER output tool calls as raw text, pseudo-code strings, or text fragments like 'call:default_api:...', 'call:get_page_dom', or 'get_page_dom{}'.
 - Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.
 - Never output raw base64 data, gibberish strings, or repeating binary characters.
 - PAGE ANALYSIS RULE: When you open a page or perform a search, you MUST NOT just report that the page/search is opened. You MUST immediately proceed to call 'get_page_dom' (or 'get_page_screenshot') to read, analyze, and comprehend its actual content before moving on or concluding, unless the user explicitly said they only wanted to open the page.
@@ -7357,6 +7721,33 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                   }
                 }
               ];
+            } else if (accumulatedText) {
+              const pseudoCall = detectPseudoToolCall(accumulatedText);
+              if (pseudoCall) {
+                activeFunctionCall = {
+                  name: pseudoCall.name,
+                  args: pseudoCall.args
+                };
+                accumulatedText = accumulatedText.replace(pseudoCall.fullMatch, '').trim();
+                setSimMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === turnMsgId ? { ...msg, text: accumulatedText } : msg
+                  )
+                );
+
+                rawModelParts = [];
+                if (accumulatedText) {
+                  rawModelParts.push({ text: accumulatedText });
+                }
+                rawModelParts.push({
+                  functionCall: {
+                    name: pseudoCall.name,
+                    args: pseudoCall.args
+                  }
+                });
+              } else {
+                rawModelParts = [{ text: accumulatedText }];
+              }
             } else {
               rawModelParts = [{ text: accumulatedText }];
             }
@@ -7714,6 +8105,33 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                   msg.id === turnMsgId ? { ...msg, text: accumulatedText } : msg
                 )
               );
+            }
+          }
+
+          if (!activeFunctionCall && accumulatedText) {
+            const pseudoCall = detectPseudoToolCall(accumulatedText);
+            if (pseudoCall) {
+              activeFunctionCall = {
+                name: pseudoCall.name,
+                args: pseudoCall.args
+              };
+              accumulatedText = accumulatedText.replace(pseudoCall.fullMatch, '').trim();
+              setSimMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === turnMsgId ? { ...msg, text: accumulatedText } : msg
+                )
+              );
+
+              rawModelParts = [];
+              if (accumulatedText) {
+                rawModelParts.push({ text: accumulatedText });
+              }
+              rawModelParts.push({
+                functionCall: {
+                  name: pseudoCall.name,
+                  args: pseudoCall.args
+                }
+              });
             }
           }
 

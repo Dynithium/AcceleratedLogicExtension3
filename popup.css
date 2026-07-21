@@ -843,6 +843,46 @@ body {
   border-radius: 0 6px 6px 0;
 }
 
+/* Modern Dark-Themed Markdown Tables */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  margin: 12px 0;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background-color: #0b111e;
+}
+
+.table-container table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.825rem;
+  text-align: left;
+}
+
+.table-container th {
+  background-color: #1e293b;
+  color: #f8fafc;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 2px solid #334155;
+  white-space: nowrap;
+}
+
+.table-container td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #1e293b;
+  color: #cbd5e1;
+}
+
+.table-container tr:last-child td {
+  border-bottom: none;
+}
+
+.table-container tr:hover td {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
 .inline-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.775rem;
