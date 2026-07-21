@@ -2511,6 +2511,87 @@ document.addEventListener("DOMContentLoaded", () => {
       .trim();
   }
 
+  function sanitizeHistory(history) {
+    const cleanHistory = [];
+    (history || []).forEach((msg, index) => {
+      const isPastTurn = index < history.length - 1;
+      const validParts = [];
+
+      (msg.parts || []).forEach(part => {
+        if (!part) return;
+
+        if (part.functionCall && part.functionCall.name) {
+          let argsObj = {};
+          if (part.functionCall.args && typeof part.functionCall.args === 'object') {
+            try {
+              argsObj = JSON.parse(JSON.stringify(part.functionCall.args));
+            } catch (e) {
+              argsObj = {};
+            }
+          }
+          validParts.push({
+            functionCall: {
+              name: String(part.functionCall.name),
+              args: argsObj
+            }
+          });
+          return;
+        }
+
+        if (part.functionResponse && part.functionResponse.name) {
+          let cleanResp = {};
+          if (part.functionResponse.response && typeof part.functionResponse.response === 'object') {
+            try {
+              cleanResp = JSON.parse(JSON.stringify(part.functionResponse.response));
+            } catch (e) {
+              cleanResp = { result: String(part.functionResponse.response) };
+            }
+          } else {
+            cleanResp = { result: String(part.functionResponse.response || "") };
+          }
+          validParts.push({
+            functionResponse: {
+              name: String(part.functionResponse.name),
+              response: cleanResp
+            }
+          });
+          return;
+        }
+
+        if (part.inlineData && part.inlineData.mimeType && part.inlineData.data) {
+          if (isPastTurn) {
+            validParts.push({ text: \`[Attachment (\${part.inlineData.mimeType}) analyzed in previous turn]\` });
+          } else {
+            validParts.push({
+              inlineData: {
+                mimeType: String(part.inlineData.mimeType),
+                data: String(part.inlineData.data)
+              }
+            });
+          }
+          return;
+        }
+
+        if (typeof part.text === 'string') {
+          const cleanedText = cleanPseudoStrings(part.text);
+          if (cleanedText && cleanedText.trim()) {
+            validParts.push({ text: cleanedText });
+          }
+          return;
+        }
+      });
+
+      if (validParts.length > 0) {
+        cleanHistory.push({
+          role: msg.role === 'model' ? 'model' : 'user',
+          parts: validParts
+        });
+      }
+    });
+
+    return cleanHistory;
+  }
+
   async function sendMessage() {
     if (isGenerating) {
       if (currentAbortController) {
@@ -3123,22 +3204,8 @@ CRITICAL RULES:
           // Call Gemini API directly with streamGenerateContent and tools enabled
           const url = \`https://generativelanguage.googleapis.com/v1beta/models/\${activeModel}:streamGenerateContent?key=\${apiKey}\`;
           
-          // Optimize chat history: strip massive base64 inlineData from all past turns to prevent token bloat and extreme latency
-          const cleanContents = chatHistory.map((msg, index) => {
-            const isPastTurn = index < chatHistory.length - 1;
-            const cleanParts = msg.parts.map(part => {
-              if (part.inlineData) {
-                if (isPastTurn) {
-                  return { text: \`[Attachment (\${part.inlineData.mimeType}) analyzed in previous turn]\` };
-                }
-              }
-              return part;
-            });
-            return {
-              role: msg.role,
-              parts: cleanParts
-            };
-          });
+          // Optimize chat history: strip massive base64 inlineData from all past turns and sanitize parts
+          const cleanContents = sanitizeHistory(chatHistory);
 
           const payload = {
             contents: cleanContents,
@@ -6355,9 +6422,17 @@ CRITICAL RULES:
       }
     }
     
+    let thinking = thinkingParts.map(t => t.trim()).filter(Boolean).join("\\n\\n");
+    let trimmedContent = content.trim();
+
+    if (!trimmedContent && thinking) {
+      trimmedContent = thinking;
+      thinking = "";
+    }
+
     return {
-      thinking: thinkingParts.map(t => t.trim()).filter(Boolean).join("\\n\\n"),
-      content: content.trim()
+      thinking: thinking,
+      content: trimmedContent
     };
   }
 
@@ -6956,6 +7031,87 @@ function cleanPseudoStrings(text: string): string {
     .trim();
 }
 
+function sanitizeHistory(history: any[]) {
+  const cleanHistory: any[] = [];
+  (history || []).forEach((msg, index) => {
+    const isPastTurn = index < history.length - 1;
+    const validParts: any[] = [];
+
+    (msg.parts || []).forEach((part: any) => {
+      if (!part) return;
+
+      if (part.functionCall && part.functionCall.name) {
+        let argsObj = {};
+        if (part.functionCall.args && typeof part.functionCall.args === 'object') {
+          try {
+            argsObj = JSON.parse(JSON.stringify(part.functionCall.args));
+          } catch (e) {
+            argsObj = {};
+          }
+        }
+        validParts.push({
+          functionCall: {
+            name: String(part.functionCall.name),
+            args: argsObj
+          }
+        });
+        return;
+      }
+
+      if (part.functionResponse && part.functionResponse.name) {
+        let cleanResp = {};
+        if (part.functionResponse.response && typeof part.functionResponse.response === 'object') {
+          try {
+            cleanResp = JSON.parse(JSON.stringify(part.functionResponse.response));
+          } catch (e) {
+            cleanResp = { result: String(part.functionResponse.response) };
+          }
+        } else {
+          cleanResp = { result: String(part.functionResponse.response || "") };
+        }
+        validParts.push({
+          functionResponse: {
+            name: String(part.functionResponse.name),
+            response: cleanResp
+          }
+        });
+        return;
+      }
+
+      if (part.inlineData && part.inlineData.mimeType && part.inlineData.data) {
+        if (isPastTurn) {
+          validParts.push({ text: `[Attachment (${part.inlineData.mimeType}) analyzed in previous turn]` });
+        } else {
+          validParts.push({
+            inlineData: {
+              mimeType: String(part.inlineData.mimeType),
+              data: String(part.inlineData.data)
+            }
+          });
+        }
+        return;
+      }
+
+      if (typeof part.text === 'string') {
+        const cleanedText = cleanPseudoStrings(part.text);
+        if (cleanedText && cleanedText.trim()) {
+          validParts.push({ text: cleanedText });
+        }
+        return;
+      }
+    });
+
+    if (validParts.length > 0) {
+      cleanHistory.push({
+        role: msg.role === 'model' ? 'model' : 'user',
+        parts: validParts
+      });
+    }
+  });
+
+  return cleanHistory;
+}
+
 // Parses thinking blocks out of the text content inside React
 function parseThinkingAndContent(text: string) {
   text = cleanPseudoStrings(text);
@@ -6986,9 +7142,17 @@ function parseThinkingAndContent(text: string) {
     }
   }
   
+  let thinking = thinkingParts.map(t => t.trim()).filter(Boolean).join("\n\n");
+  let trimmedContent = content.trim();
+
+  if (!trimmedContent && thinking) {
+    trimmedContent = thinking;
+    thinking = "";
+  }
+
   return {
-    thinking: thinkingParts.map(t => t.trim()).filter(Boolean).join("\n\n"),
-    content: content.trim()
+    thinking: thinking,
+    content: trimmedContent
   };
 }
 
@@ -7553,22 +7717,8 @@ export default function App() {
           hasMoreTurns = false;
           let activeFunctionCall: any = null;
 
-          // Optimize history: strip massive base64 inlineData from all past turns to prevent token bloat
-          const optimizedHistory = localHistory.map((msg, idx) => {
-            const isPastTurn = idx < localHistory.length - 1;
-            const cleanParts = msg.parts.map((part: any) => {
-              if (part.inlineData) {
-                if (isPastTurn) {
-                  return { text: `[Attachment (${part.inlineData.mimeType}) analyzed in previous turn]` };
-                }
-              }
-              return part;
-            });
-            return {
-              role: msg.role,
-              parts: cleanParts
-            };
-          });
+          // Optimize history: strip massive base64 inlineData from all past turns and sanitize parts
+          const optimizedHistory = sanitizeHistory(localHistory);
 
           const turnMsgId = Date.now() + Math.random();
           setSimMessages((prev) => [
