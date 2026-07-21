@@ -2424,78 +2424,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function detectPseudoToolCall(text) {
-    if (!text) return null;
-
-    const knownToolsMap = {
-      "get_page_dom": "get_page_dom",
-      "getpagedom": "get_page_dom",
-      "getpage_dom": "get_page_dom",
-      "get_page_screenshot": "get_page_screenshot",
-      "getpagescreenshot": "get_page_screenshot",
-      "getpage_screenshot": "get_page_screenshot",
-      "click_element": "click_element",
-      "clickelement": "click_element",
-      "click_at_coordinate": "click_at_coordinate",
-      "clickatcoordinate": "click_at_coordinate",
-      "type_text": "type_text",
-      "typetext": "type_text",
-      "scroll_page": "scroll_page",
-      "scrollpage": "scroll_page",
-      "wait": "wait",
-      "open_tab": "open_tab",
-      "opentab": "open_tab",
-      "search_web": "search_web",
-      "searchweb": "search_web",
-      "list_tabs": "list_tabs",
-      "listtabs": "list_tabs",
-      "switch_tab": "switch_tab",
-      "switchtab": "switch_tab",
-      "press_key": "press_key",
-      "presskey": "press_key",
-      "select_text": "select_text",
-      "selecttext": "select_text",
-      "replace_text": "replace_text",
-      "replacetext": "replace_text"
-    };
-
-    const regex = /(?:call:)?(?:default_?api:)?([a_zA_Z0-9_]+)\\s*(\\([^{}]*\\)|\\{[^}]*\\}|)/gi;
-    let match;
-
-    while ((match = regex.exec(text)) !== null) {
-      const rawMatch = match[0];
-      const rawName = match[1].toLowerCase().trim();
-      const mappedName = knownToolsMap[rawName];
-
-      if (mappedName) {
-        const isExplicitCall = /call:|default_?api:/i.test(rawMatch) || /\\(|\\{|\\}/.test(rawMatch);
-        if (isExplicitCall) {
-          let rawArgs = match[2] || "{}";
-          rawArgs = rawArgs.trim();
-          if (rawArgs.startsWith("(") && rawArgs.endsWith(")")) {
-            rawArgs = rawArgs.slice(1, -1).trim();
-          }
-          if (!rawArgs || rawArgs === "()") rawArgs = "{}";
-
-          let parsedArgs = {};
-          try {
-            parsedArgs = JSON.parse(rawArgs);
-          } catch (e) {
-            parsedArgs = {};
-          }
-
-          return {
-            fullMatch: rawMatch,
-            name: mappedName,
-            args: parsedArgs
-          };
-        }
-      }
-    }
-
-    return null;
-  }
-
   async function sendMessage() {
     if (isGenerating) {
       if (currentAbortController) {
@@ -2927,6 +2855,63 @@ CRITICAL RULES:
                   required: ["replaceText"]
                 }
               }
+            },
+            {
+              type: "function",
+              function: {
+                name: "extract_links",
+                description: "Extracts all hyperlinks (URLs and anchor texts) on the active webpage, with an optional search filter keyword or CSS selector.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    keyword: { type: "string", description: "Optional keyword or search term to filter link URLs or text." },
+                    selector: { type: "string", description: "Optional CSS selector to scope link extraction (e.g. 'nav', 'main', '.articles')." }
+                  }
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "execute_script",
+                description: "Evaluates custom JavaScript code inside the active webpage context and returns the evaluation output.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    code: { type: "string", description: "The JavaScript code string to execute (e.g. 'document.title' or 'window.scrollY')." }
+                  },
+                  required: ["code"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "go_back_forward",
+                description: "Navigates browser history back or forward on the active tab.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    direction: { type: "string", enum: ["back", "forward"], description: "The navigation direction ('back' or 'forward')." }
+                  },
+                  required: ["direction"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "get_element_details",
+                description: "Inspects an element by CSS selector or text context to retrieve its dimensions, position, inner HTML, text content, and attributes.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    selector: { type: "string", description: "CSS selector of the element to inspect." },
+                    textContext: { type: "string", description: "Optional text context inside the element to match." }
+                  },
+                  required: ["selector"]
+                }
+              }
             }
           ];
 
@@ -3020,29 +3005,6 @@ CRITICAL RULES:
                 }
               }
             ];
-          } else if (accumulatedText) {
-            const pseudoCall = detectPseudoToolCall(accumulatedText);
-            if (pseudoCall) {
-              activeFunctionCall = {
-                name: pseudoCall.name,
-                args: pseudoCall.args
-              };
-              accumulatedText = accumulatedText.replace(pseudoCall.fullMatch, '').trim();
-              updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
-
-              rawModelParts = [];
-              if (accumulatedText) {
-                rawModelParts.push({ text: accumulatedText });
-              }
-              rawModelParts.push({
-                functionCall: {
-                  name: pseudoCall.name,
-                  args: pseudoCall.args
-                }
-              });
-            } else {
-              rawModelParts = [{ text: accumulatedText }];
-            }
           } else {
             rawModelParts = [{ text: accumulatedText }];
           }
@@ -3320,6 +3282,51 @@ CRITICAL RULES:
                     },
                     required: ["replaceText"]
                   }
+                },
+                {
+                  name: "extract_links",
+                  description: "Extracts all hyperlinks (URLs and anchor texts) on the active webpage, with an optional search filter keyword or CSS selector.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      keyword: { type: "STRING", description: "Optional keyword or search term to filter link URLs or text." },
+                      selector: { type: "STRING", description: "Optional CSS selector to scope link extraction (e.g. 'nav', 'main', '.articles')." }
+                    }
+                  }
+                },
+                {
+                  name: "execute_script",
+                  description: "Evaluates custom JavaScript code inside the active webpage context and returns the evaluation output.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      code: { type: "STRING", description: "The JavaScript code string to execute (e.g. 'document.title' or 'window.scrollY')." }
+                    },
+                    required: ["code"]
+                  }
+                },
+                {
+                  name: "go_back_forward",
+                  description: "Navigates browser history back or forward on the active tab.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      direction: { type: "STRING", enum: ["back", "forward"], description: "The navigation direction ('back' or 'forward')." }
+                    },
+                    required: ["direction"]
+                  }
+                },
+                {
+                  name: "get_element_details",
+                  description: "Inspects an element by CSS selector or text context to retrieve its dimensions, position, inner HTML, text content, and attributes.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      selector: { type: "STRING", description: "CSS selector of the element to inspect." },
+                      textContext: { type: "STRING", description: "Optional text context inside the element to match." }
+                    },
+                    required: ["selector"]
+                  }
                 }
               ]
             }]
@@ -3433,29 +3440,6 @@ CRITICAL RULES:
             accumulatedText += "</thinking>";
             inThinkingBlock = false;
             updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
-          }
-        }
-
-        if (!activeFunctionCall && accumulatedText) {
-          const pseudoCall = detectPseudoToolCall(accumulatedText);
-          if (pseudoCall) {
-            activeFunctionCall = {
-              name: pseudoCall.name,
-              args: pseudoCall.args
-            };
-            accumulatedText = accumulatedText.replace(pseudoCall.fullMatch, '').trim();
-            updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
-
-            rawModelParts = [];
-            if (accumulatedText) {
-              rawModelParts.push({ text: accumulatedText });
-            }
-            rawModelParts.push({
-              functionCall: {
-                name: pseudoCall.name,
-                args: pseudoCall.args
-              }
-            });
           }
         }
 
@@ -3577,6 +3561,14 @@ CRITICAL RULES:
               const k = activeFunctionCall.args?.key || "";
               const duration = activeFunctionCall.args?.holdDuration !== undefined ? Number(activeFunctionCall.args?.holdDuration) : 50;
               note = \`Pressed key: "\${k}"\${duration > 50 ? \` (held down for \${duration}ms)\` : ""}\`;
+            } else if (activeFunctionCall.name === "extract_links") {
+              note = \`Extracted \${toolResult.count || 0} links from page.\`;
+            } else if (activeFunctionCall.name === "execute_script") {
+              note = \`Evaluated JavaScript script on tab.\`;
+            } else if (activeFunctionCall.name === "go_back_forward") {
+              note = \`Navigated browser history \${activeFunctionCall.args?.direction || "back"}.\`;
+            } else if (activeFunctionCall.name === "get_element_details") {
+              note = \`Inspected details for selector "\${activeFunctionCall.args?.selector || ""}".\`;
             }
             responseDiv.textContent = note;
           }
@@ -3706,9 +3698,6 @@ CRITICAL RULES:
     
     const mathBlocks = [];
     let processedText = text;
-
-    // Clean up any remaining pseudo tool call raw strings (like call:defaultapi:getpage_dom{}) from display
-    processedText = processedText.replace(/(?:call:)?(?:default_?api:)?(?:get_?page_?dom|get_?page_?screenshot|click_?element|click_?at_?coordinate|type_?text|scroll_?page|wait|open_?tab|search_?web|list_?tabs|switch_?tab|press_?key|select_?text|replace_?text)\\s*(\\([^{}]*\\)|\\{[^}]*\\}|)/gi, "").trim();
 
     // 1. Extract Display Math: $$ ... $$ or \\[ ... \\]
     processedText = processedText.replace(/\\$\\$([\\s\\S]+?)\\$\\$/g, (match, formula) => {
@@ -4647,6 +4636,45 @@ CRITICAL RULES:
             success: true,
             replaceText: rep,
             message: \`[Simulator Fallback] Successfully replaced selected text with "\${rep}" in virtual space.\`
+          });
+        } else if (name === "extract_links") {
+          const kw = args.keyword || "";
+          resolve({
+            success: true,
+            count: 4,
+            links: [
+              { href: "https://acceleratedlogic.ai/docs", text: "Documentation", title: "API Docs" },
+              { href: "https://acceleratedlogic.ai/features", text: "Extension Features", title: "Features" },
+              { href: "https://github.com/AcceleratedLogic", text: "GitHub Repository", title: "GitHub" },
+              { href: "https://acceleratedlogic.ai/contact", text: "Contact Support", title: "Support" }
+            ],
+            message: \`[Simulator Fallback] Extracted hyperlinks from page\${kw ? \` matching keyword "\${kw}"\` : ''}.\`
+          });
+        } else if (name === "execute_script") {
+          const codeStr = args.code || "";
+          resolve({
+            success: true,
+            result: \`[Simulator Execution] Successfully evaluated script: \${codeStr}\`,
+            output: "window.scrollY = 0; document.title = 'AcceleratedLogic';"
+          });
+        } else if (name === "go_back_forward") {
+          const dir = args.direction || "back";
+          resolve({
+            success: true,
+            direction: dir,
+            message: \`[Simulator Fallback] Successfully navigated browser history \${dir}.\`
+          });
+        } else if (name === "get_element_details") {
+          const sel = args.selector || "";
+          resolve({
+            success: true,
+            tagName: "DIV",
+            id: "app-container",
+            className: "main-wrapper flex",
+            rect: { x: 40, y: 100, width: 720, height: 460 },
+            textContent: "AcceleratedLogic AI Assistant active viewport element content.",
+            attributes: { id: "app-container", class: "main-wrapper flex", "data-active": "true" },
+            isVisible: true
           });
         } else {
           resolve({ error: "Unknown tool" });
@@ -6002,6 +6030,137 @@ CRITICAL RULES:
               resolve({ success: false, error: "Script injection failed for replace_text." });
             }
           });
+        } else if (name === "extract_links") {
+          const keyword = args.keyword || "";
+          const selector = args.selector || "";
+
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            args: [keyword, selector],
+            func: (kw, sel) => {
+              try {
+                const root = sel ? (document.querySelector(sel) || document) : document;
+                const anchors = Array.from(root.querySelectorAll('a[href]'));
+                let results = anchors.map(a => ({
+                  href: a.href,
+                  text: (a.innerText || a.textContent || '').trim(),
+                  title: a.title || ''
+                })).filter(i => i.href && !i.href.startsWith('javascript:'));
+
+                if (kw) {
+                  const kwLower = kw.toLowerCase();
+                  results = results.filter(i => i.href.toLowerCase().includes(kwLower) || i.text.toLowerCase().includes(kwLower) || i.title.toLowerCase().includes(kwLower));
+                }
+
+                return {
+                  success: true,
+                  count: results.length,
+                  links: results.slice(0, 50)
+                };
+              } catch (e) {
+                return { success: false, error: e.message };
+              }
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve(results[0].result);
+            } else {
+              resolve({ success: false, error: "Failed to extract links from tab." });
+            }
+          });
+        } else if (name === "execute_script") {
+          const codeStr = args.code || "";
+
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            args: [codeStr],
+            func: (codeToEval) => {
+              try {
+                const res = eval(codeToEval);
+                return {
+                  success: true,
+                  result: typeof res === 'object' ? JSON.stringify(res) : String(res)
+                };
+              } catch (e) {
+                return { success: false, error: "Script execution error: " + e.message };
+              }
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve(results[0].result);
+            } else {
+              resolve({ success: false, error: "Failed to execute script on tab." });
+            }
+          });
+        } else if (name === "go_back_forward") {
+          const dir = args.direction || "back";
+
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            args: [dir],
+            func: (direction) => {
+              try {
+                if (direction === "forward") {
+                  history.forward();
+                } else {
+                  history.back();
+                }
+                return { success: true, direction };
+              } catch (e) {
+                return { success: false, error: e.message };
+              }
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve(results[0].result);
+            } else {
+              resolve({ success: false, error: "Failed to navigate history." });
+            }
+          });
+        } else if (name === "get_element_details") {
+          const selector = args.selector || "";
+          const textContext = args.textContext || "";
+
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            args: [selector, textContext],
+            func: (sel, textCtx) => {
+              try {
+                let el = document.querySelector(sel);
+                if (textCtx && sel) {
+                  const matches = Array.from(document.querySelectorAll(sel));
+                  const found = matches.find(m => (m.innerText || '').toLowerCase().includes(textCtx.toLowerCase()));
+                  if (found) el = found;
+                }
+                if (!el) return { success: false, error: \`Element matching selector "\${sel}" not found.\` };
+
+                const rect = el.getBoundingClientRect();
+                const attrs = {};
+                for (let a of el.attributes) {
+                  attrs[a.name] = a.value;
+                }
+
+                return {
+                  success: true,
+                  tagName: el.tagName,
+                  id: el.id,
+                  className: el.className,
+                  rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+                  textContent: (el.textContent || '').trim().slice(0, 500),
+                  attributes: attrs,
+                  isVisible: rect.width > 0 && rect.height > 0
+                };
+              } catch (e) {
+                return { success: false, error: e.message };
+              }
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve(results[0].result);
+            } else {
+              resolve({ success: false, error: "Failed to inspect element." });
+            }
+          });
         } else {
           resolve({ error: "Unknown tool" });
         }
@@ -7284,78 +7443,6 @@ export default function App() {
           let buffer = "";
           let inThinkingBlock = false;
 
-          const detectPseudoToolCall = (text: string) => {
-            if (!text) return null;
-
-            const knownToolsMap: Record<string, string> = {
-              "get_page_dom": "get_page_dom",
-              "getpagedom": "get_page_dom",
-              "getpage_dom": "get_page_dom",
-              "get_page_screenshot": "get_page_screenshot",
-              "getpagescreenshot": "get_page_screenshot",
-              "getpage_screenshot": "get_page_screenshot",
-              "click_element": "click_element",
-              "clickelement": "click_element",
-              "click_at_coordinate": "click_at_coordinate",
-              "clickatcoordinate": "click_at_coordinate",
-              "type_text": "type_text",
-              "typetext": "type_text",
-              "scroll_page": "scroll_page",
-              "scrollpage": "scroll_page",
-              "wait": "wait",
-              "open_tab": "open_tab",
-              "opentab": "open_tab",
-              "search_web": "search_web",
-              "searchweb": "search_web",
-              "list_tabs": "list_tabs",
-              "listtabs": "list_tabs",
-              "switch_tab": "switch_tab",
-              "switchtab": "switch_tab",
-              "press_key": "press_key",
-              "presskey": "press_key",
-              "select_text": "select_text",
-              "selecttext": "select_text",
-              "replace_text": "replace_text",
-              "replacetext": "replace_text"
-            };
-
-            const regex = /(?:call:)?(?:default_?api:)?([a_zA_Z0-9_]+)\s*(\([^{}]*\)|\{[^}]*\}|)/gi;
-            let match;
-
-            while ((match = regex.exec(text)) !== null) {
-              const rawMatch = match[0];
-              const rawName = match[1].toLowerCase().trim();
-              const mappedName = knownToolsMap[rawName];
-
-              if (mappedName) {
-                const isExplicitCall = /call:|default_?api:/i.test(rawMatch) || /\(|\{|\}/.test(rawMatch);
-                if (isExplicitCall) {
-                  let rawArgs = match[2] || "{}";
-                  rawArgs = rawArgs.trim();
-                  if (rawArgs.startsWith("(") && rawArgs.endsWith(")")) {
-                    rawArgs = rawArgs.slice(1, -1).trim();
-                  }
-                  if (!rawArgs || rawArgs === "()") rawArgs = "{}";
-
-                  let parsedArgs = {};
-                  try {
-                    parsedArgs = JSON.parse(rawArgs);
-                  } catch (e) {
-                    parsedArgs = {};
-                  }
-
-                  return {
-                    fullMatch: rawMatch,
-                    name: mappedName,
-                    args: parsedArgs
-                  };
-                }
-              }
-            }
-
-            return null;
-          };
-
           const isVisionCapable = simProvider === "gemini" || !!simOpenaiCapabilities?.vision;
           const systemInstructionText = `You are AcceleratedLogic, an advanced browser assistant Chrome Extension.
 You help users analyze web pages, answer questions, and perform research.
@@ -7721,33 +7808,6 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                   }
                 }
               ];
-            } else if (accumulatedText) {
-              const pseudoCall = detectPseudoToolCall(accumulatedText);
-              if (pseudoCall) {
-                activeFunctionCall = {
-                  name: pseudoCall.name,
-                  args: pseudoCall.args
-                };
-                accumulatedText = accumulatedText.replace(pseudoCall.fullMatch, '').trim();
-                setSimMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === turnMsgId ? { ...msg, text: accumulatedText } : msg
-                  )
-                );
-
-                rawModelParts = [];
-                if (accumulatedText) {
-                  rawModelParts.push({ text: accumulatedText });
-                }
-                rawModelParts.push({
-                  functionCall: {
-                    name: pseudoCall.name,
-                    args: pseudoCall.args
-                  }
-                });
-              } else {
-                rawModelParts = [{ text: accumulatedText }];
-              }
             } else {
               rawModelParts = [{ text: accumulatedText }];
             }
@@ -8105,33 +8165,6 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                   msg.id === turnMsgId ? { ...msg, text: accumulatedText } : msg
                 )
               );
-            }
-          }
-
-          if (!activeFunctionCall && accumulatedText) {
-            const pseudoCall = detectPseudoToolCall(accumulatedText);
-            if (pseudoCall) {
-              activeFunctionCall = {
-                name: pseudoCall.name,
-                args: pseudoCall.args
-              };
-              accumulatedText = accumulatedText.replace(pseudoCall.fullMatch, '').trim();
-              setSimMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === turnMsgId ? { ...msg, text: accumulatedText } : msg
-                )
-              );
-
-              rawModelParts = [];
-              if (accumulatedText) {
-                rawModelParts.push({ text: accumulatedText });
-              }
-              rawModelParts.push({
-                functionCall: {
-                  name: pseudoCall.name,
-                  args: pseudoCall.args
-                }
-              });
             }
           }
 
