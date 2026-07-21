@@ -972,15 +972,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       if (validParts.length > 0) {
-      let finalParts = validParts;
-      if (msg.role === 'model') {
-        const fnCalls = validParts.filter(p => p.functionCall);
-        if (fnCalls.length > 1) {
-          // Keep text parts and ONLY the FIRST function call
-          finalParts = validParts.filter(p => !p.functionCall || p === fnCalls[0]);
-        }
-      }
-      cleanHistory.push({
+        cleanHistory.push({
           role: msg.role === 'model' ? 'model' : 'user',
           parts: validParts
         });
@@ -1498,7 +1490,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
           if (!response.ok) {
             const errJson = await response.json();
-            throw new Error(errJson.error?.message || errJson.error?.error?.message || errJson.message || (Object.keys(errJson).length ? JSON.stringify(errJson) : `API Error: ${response.status}`));
+            throw new Error(errJson.error?.message || `API Error: ${response.status}`);
           }
 
           if (!response.body) {
@@ -1918,7 +1910,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
           if (!response.ok) {
             const errJson = await response.json();
-            throw new Error(errJson.error?.message || errJson.error?.error?.message || errJson.message || (Object.keys(errJson).length ? JSON.stringify(errJson) : `API Error: ${response.status}`));
+            throw new Error(errJson.error?.message || `API Error: ${response.status}`);
           }
 
           if (!response.body) {
