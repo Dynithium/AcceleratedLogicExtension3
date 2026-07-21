@@ -926,6 +926,7 @@ document.addEventListener("DOMContentLoaded", () => {
       .replace(/(?:call:)?(?:default_?api:)[a-zA-Z0-9_]*\s*(\([^{}]*\)|\{[^}]*\}|)/gi, "")
       .replace(/(?:call:)?(?:default_?api:)?(?:get_?page_?dom|get_?page_?screenshot|click_?element|click_?at_?coordinate|type_?text|scroll_?page|wait|open_?tab|search_?web|list_?tabs|switch_?tab|press_?key|select_?text|replace_?text|extract_?links|execute_?script|go_?back_?forward|get_?element_?details)\s*(\([^{}]*\)|\{[^}]*\}|)/gi, "")
       .replace(/call:[a-zA-Z0-9_]+\s*(\([^{}]*\)|\{[^}]*\}|)/gi, "")
+      .replace(/[a-zA-Z0-9_$]+\s*=\s*\{?\s*$/gi, "")
       .replace(/<thinking>\s*<\/thinking>/gi, "")
       .trim();
   }
@@ -1001,9 +1002,16 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       if (validParts.length > 0) {
+        let finalParts = validParts;
+        if (msg.role === 'model') {
+          const fnCallPart = validParts.find(p => p.functionCall);
+          if (fnCallPart) {
+            finalParts = [fnCallPart];
+          }
+        }
         cleanHistory.push({
           role: msg.role === 'model' ? 'model' : 'user',
-          parts: validParts
+          parts: finalParts
         });
       }
     });
@@ -2066,6 +2074,12 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           // Model requested a tool execution! We set hasMoreTurns to true to send the response back
           hasMoreTurns = true;
 
+          // Clean stray pseudo code (like userData={ or call:...) from accumulatedText
+          accumulatedText = cleanPseudoStrings(accumulatedText)
+            .replace(/[a-zA-Z0-9_$]+\s*=\s*\{?\s*$/gi, "")
+            .trim();
+          updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
+
           if (currentLoaderDiv && currentLoaderDiv.parentNode === currentAssistantBubble) {
             currentLoaderDiv.remove();
           }
@@ -2134,10 +2148,15 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           }
           scrollToBottom();
 
-          // 1. Add model's functionCall to chat history (preserving thoughts text and signatures)
+          // 1. Add model's functionCall to chat history (must be standalone functionCall part in Gemini API)
           chatHistory.push({
             role: "model",
-            parts: rawModelParts
+            parts: [{
+              functionCall: {
+                name: activeFunctionCall.name,
+                args: activeFunctionCall.args || {}
+              }
+            }]
           });
 
           // 2. Execute the tool
