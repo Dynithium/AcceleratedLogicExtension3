@@ -931,6 +931,25 @@ document.addEventListener("DOMContentLoaded", () => {
       .trim();
   }
 
+  function sanitizeToolResult(toolResult) {
+    if (typeof toolResult === 'object' && toolResult !== null) {
+      try {
+        const sanitized = JSON.parse(JSON.stringify(toolResult, (key, value) => {
+          if (value === undefined) return undefined;
+          if (key === 'screenshot_url' && typeof value === 'string' && value.length > 1000) return undefined;
+          return value;
+        }));
+        if (sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized)) {
+          return sanitized;
+        }
+        return { output: String(JSON.stringify(toolResult)) };
+      } catch (e) {
+        return { output: String(toolResult) };
+      }
+    }
+    return { output: String(toolResult || 'Execution completed.') };
+  }
+
   function sanitizeHistory(history) {
     const cleanHistory = [];
     (history || []).forEach((msg, index) => {
@@ -938,15 +957,25 @@ document.addEventListener("DOMContentLoaded", () => {
       const validParts = [];
 
       (msg.parts || []).forEach(part => {
-        if (!part) return;
+        if (!part || typeof part !== 'object') return;
 
-        if (part.functionCall) {
-          validParts.push(part);
+        if (part.functionCall && part.functionCall.name) {
+          validParts.push({
+            functionCall: {
+              name: String(part.functionCall.name),
+              args: (part.functionCall.args && typeof part.functionCall.args === 'object') ? part.functionCall.args : {}
+            }
+          });
           return;
         }
 
-        if (part.functionResponse) {
-          validParts.push(part);
+        if (part.functionResponse && part.functionResponse.name) {
+          validParts.push({
+            functionResponse: {
+              name: String(part.functionResponse.name),
+              response: sanitizeToolResult(part.functionResponse.response)
+            }
+          });
           return;
         }
 
@@ -954,7 +983,12 @@ document.addEventListener("DOMContentLoaded", () => {
           if (isPastTurn) {
             validParts.push({ text: `[Attachment (${part.inlineData.mimeType}) analyzed in previous turn]` });
           } else {
-            validParts.push(part);
+            validParts.push({
+              inlineData: {
+                mimeType: String(part.inlineData.mimeType),
+                data: String(part.inlineData.data)
+              }
+            });
           }
           return;
         }
@@ -962,13 +996,10 @@ document.addEventListener("DOMContentLoaded", () => {
         if (typeof part.text === 'string') {
           const cleanedText = cleanPseudoStrings(part.text);
           if (cleanedText && cleanedText.trim()) {
-            validParts.push({ ...part, text: cleanedText });
+            validParts.push({ text: cleanedText.trim() });
           }
           return;
         }
-        
-        // Pass through anything else (like executableCode, etc)
-        validParts.push(part);
       });
 
       if (validParts.length > 0) {
@@ -2111,10 +2142,31 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           }
           scrollToBottom();
 
-          // 1. Add model's functionCall to chat history (preserving generated thoughts/text and signatures)
+          // 1. Add model's functionCall to chat history (sanitized & normalized)
+          const cleanModelParts = [];
+          const combinedModelText = cleanPseudoStrings(accumulatedText);
+          if (combinedModelText && combinedModelText.trim()) {
+            cleanModelParts.push({ text: combinedModelText.trim() });
+          }
+          if (activeFunctionCall && activeFunctionCall.name) {
+            cleanModelParts.push({
+              functionCall: {
+                name: String(activeFunctionCall.name),
+                args: (activeFunctionCall.args && typeof activeFunctionCall.args === 'object') ? activeFunctionCall.args : {}
+              }
+            });
+          }
+
           chatHistory.push({
             role: "model",
-            parts: rawModelParts
+            parts: cleanModelParts.length > 0 ? cleanModelParts : [
+              {
+                functionCall: {
+                  name: String(activeFunctionCall.name),
+                  args: (activeFunctionCall.args && typeof activeFunctionCall.args === 'object') ? activeFunctionCall.args : {}
+                }
+              }
+            ]
           });
 
           // 2. Execute the tool
@@ -2171,21 +2223,19 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           scrollToBottom();
 
           // 3. Add functionResponse to chat history (with image attachment if it's get_page_screenshot)
-          const cleanToolResult = { ...toolResult };
-          if (cleanToolResult.screenshot_url) {
-            delete cleanToolResult.screenshot_url; // Remove the massive base64 from the textual tool response
+          const rawResponseData = { ...toolResult };
+          if (rawResponseData.screenshot_url) {
+            delete rawResponseData.screenshot_url; // Remove the massive base64 from the textual tool response
+          }
+          if (activeFunctionCall.name === "get_page_screenshot") {
+            rawResponseData.message = "Screenshot captured successfully and attached as an image part. Please analyze the image to answer.";
           }
 
           const responseParts = [
             {
               functionResponse: {
-                name: activeFunctionCall.name,
-                response: {
-                  ...cleanToolResult,
-                  message: activeFunctionCall.name === "get_page_screenshot" 
-                    ? "Screenshot captured successfully and attached as an image part. Please analyze the image to answer."
-                    : undefined
-                }
+                name: String(activeFunctionCall.name),
+                response: sanitizeToolResult(rawResponseData)
               }
             }
           ];
