@@ -843,176 +843,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function detectPseudoToolCall(text) {
-    if (!text) return null;
-
-    const knownToolsMap = {
-      "get_page_dom": "get_page_dom",
-      "getpagedom": "get_page_dom",
-      "getpage_dom": "get_page_dom",
-      "get_page_screenshot": "get_page_screenshot",
-      "getpagescreenshot": "get_page_screenshot",
-      "getpage_screenshot": "get_page_screenshot",
-      "click_element": "click_element",
-      "clickelement": "click_element",
-      "click_at_coordinate": "click_at_coordinate",
-      "clickatcoordinate": "click_at_coordinate",
-      "type_text": "type_text",
-      "typetext": "type_text",
-      "scroll_page": "scroll_page",
-      "scrollpage": "scroll_page",
-      "wait": "wait",
-      "open_tab": "open_tab",
-      "opentab": "open_tab",
-      "search_web": "search_web",
-      "searchweb": "search_web",
-      "list_tabs": "list_tabs",
-      "listtabs": "list_tabs",
-      "switch_tab": "switch_tab",
-      "switchtab": "switch_tab",
-      "press_key": "press_key",
-      "presskey": "press_key",
-      "select_text": "select_text",
-      "selecttext": "select_text",
-      "replace_text": "replace_text",
-      "replacetext": "replace_text",
-      "extract_links": "extract_links",
-      "extractlinks": "extract_links",
-      "execute_script": "execute_script",
-      "executescript": "execute_script",
-      "go_back_forward": "go_back_forward",
-      "gobackforward": "go_back_forward",
-      "get_element_details": "get_element_details",
-      "getelementdetails": "get_element_details"
-    };
-
-    const regex = /(?:call:)?(?:default_?api:)?([a-zA-Z0-9_]+)\s*(\([^{}]*\)|\{[^}]*\}|)/gi;
-    let match;
-
-    while ((match = regex.exec(text)) !== null) {
-      const rawMatch = match[0];
-      const rawName = match[1].toLowerCase().trim();
-      const mappedName = knownToolsMap[rawName];
-
-      if (mappedName) {
-        let rawArgs = match[2] || "{}";
-        rawArgs = rawArgs.trim();
-        if (rawArgs.startsWith("(") && rawArgs.endsWith(")")) {
-          rawArgs = rawArgs.slice(1, -1).trim();
-        }
-        if (!rawArgs || rawArgs === "()") rawArgs = "{}";
-
-        let parsedArgs = {};
-        try {
-          parsedArgs = JSON.parse(rawArgs);
-        } catch (e) {
-          parsedArgs = {};
-        }
-
-        return {
-          fullMatch: rawMatch,
-          name: mappedName,
-          args: parsedArgs
-        };
-      }
-    }
-
-    return null;
-  }
-
-  function cleanPseudoStrings(text) {
-    if (!text) return text;
-    return text
-      .replace(/(?:call:)?(?:default_?api:)[a-zA-Z0-9_]*\s*(\([^{}]*\)|\{[^}]*\}|)/gi, "")
-      .replace(/(?:call:)?(?:default_?api:)?(?:get_?page_?dom|get_?page_?screenshot|click_?element|click_?at_?coordinate|type_?text|scroll_?page|wait|open_?tab|search_?web|list_?tabs|switch_?tab|press_?key|select_?text|replace_?text|extract_?links|execute_?script|go_?back_?forward|get_?element_?details)\s*(\([^{}]*\)|\{[^}]*\}|)/gi, "")
-      .replace(/call:[a-zA-Z0-9_]+\s*(\([^{}]*\)|\{[^}]*\}|)/gi, "")
-      .replace(/[a-zA-Z0-9_$]+\s*=\s*\{?\s*$/gi, "")
-      .replace(/<thinking>\s*<\/thinking>/gi, "")
-      .trim();
-  }
-
-  function sanitizeToolResult(toolResult) {
-    if (typeof toolResult === 'object' && toolResult !== null) {
-      try {
-        const sanitized = JSON.parse(JSON.stringify(toolResult, (key, value) => {
-          if (value === undefined) return undefined;
-          if (key === 'screenshot_url' && typeof value === 'string' && value.length > 1000) return undefined;
-          return value;
-        }));
-        if (sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized)) {
-          return sanitized;
-        }
-        return { output: String(JSON.stringify(toolResult)) };
-      } catch (e) {
-        return { output: String(toolResult) };
-      }
-    }
-    return { output: String(toolResult || 'Execution completed.') };
-  }
-
-  function sanitizeHistory(history) {
-    const cleanHistory = [];
-    (history || []).forEach((msg, index) => {
-      const isPastTurn = index < history.length - 1;
-      const validParts = [];
-
-      (msg.parts || []).forEach(part => {
-        if (!part || typeof part !== 'object') return;
-
-        if (part.functionCall && part.functionCall.name) {
-          validParts.push({
-            functionCall: {
-              name: String(part.functionCall.name),
-              args: (part.functionCall.args && typeof part.functionCall.args === 'object') ? part.functionCall.args : {}
-            }
-          });
-          return;
-        }
-
-        if (part.functionResponse && part.functionResponse.name) {
-          validParts.push({
-            functionResponse: {
-              name: String(part.functionResponse.name),
-              response: sanitizeToolResult(part.functionResponse.response)
-            }
-          });
-          return;
-        }
-
-        if (part.inlineData && part.inlineData.mimeType && part.inlineData.data) {
-          if (isPastTurn) {
-            validParts.push({ text: `[Attachment (${part.inlineData.mimeType}) analyzed in previous turn]` });
-          } else {
-            validParts.push({
-              inlineData: {
-                mimeType: String(part.inlineData.mimeType),
-                data: String(part.inlineData.data)
-              }
-            });
-          }
-          return;
-        }
-
-        if (typeof part.text === 'string') {
-          const cleanedText = cleanPseudoStrings(part.text);
-          if (cleanedText && cleanedText.trim()) {
-            validParts.push({ text: cleanedText.trim() });
-          }
-          return;
-        }
-      });
-
-      if (validParts.length > 0) {
-        cleanHistory.push({
-          role: msg.role === 'model' ? 'model' : 'user',
-          parts: validParts
-        });
-      }
-    });
-
-    return cleanHistory;
-  }
-
   async function sendMessage() {
     if (isGenerating) {
       if (currentAbortController) {
@@ -1594,29 +1424,6 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                 }
               }
             ];
-          } else if (accumulatedText) {
-            const pseudoCall = detectPseudoToolCall(accumulatedText);
-            if (pseudoCall) {
-              activeFunctionCall = {
-                name: pseudoCall.name,
-                args: pseudoCall.args
-              };
-              accumulatedText = accumulatedText.replace(pseudoCall.fullMatch, '').trim();
-              updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
-
-              rawModelParts = [];
-              if (accumulatedText) {
-                rawModelParts.push({ text: accumulatedText });
-              }
-              rawModelParts.push({
-                functionCall: {
-                  name: pseudoCall.name,
-                  args: pseudoCall.args
-                }
-              });
-            } else {
-              rawModelParts = [{ text: accumulatedText }];
-            }
           } else {
             rawModelParts = [{ text: accumulatedText }];
           }
@@ -1625,8 +1432,22 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           // Call Gemini API directly with streamGenerateContent and tools enabled
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:streamGenerateContent?key=${apiKey}`;
           
-          // Optimize chat history: strip massive base64 inlineData from all past turns and sanitize parts
-          const cleanContents = sanitizeHistory(chatHistory);
+          // Optimize chat history: strip massive base64 inlineData from all past turns to prevent token bloat and extreme latency
+          const cleanContents = chatHistory.map((msg, index) => {
+            const isPastTurn = index < chatHistory.length - 1;
+            const cleanParts = msg.parts.map(part => {
+              if (part.inlineData) {
+                if (isPastTurn) {
+                  return { text: `[Attachment (${part.inlineData.mimeType}) analyzed in previous turn]` };
+                }
+              }
+              return part;
+            });
+            return {
+              role: msg.role,
+              parts: cleanParts
+            };
+          });
 
           const payload = {
             contents: cleanContents,
@@ -2041,38 +1862,9 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           }
         }
 
-        if (!activeFunctionCall && accumulatedText) {
-          const pseudoCall = detectPseudoToolCall(accumulatedText);
-          if (pseudoCall) {
-            activeFunctionCall = {
-              name: pseudoCall.name,
-              args: pseudoCall.args
-            };
-            accumulatedText = accumulatedText.replace(pseudoCall.fullMatch, '').trim();
-            updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
-
-            rawModelParts = [];
-            if (accumulatedText) {
-              rawModelParts.push({ text: accumulatedText });
-            }
-            rawModelParts.push({
-              functionCall: {
-                name: pseudoCall.name,
-                args: pseudoCall.args
-              }
-            });
-          }
-        }
-
         if (activeFunctionCall) {
           // Model requested a tool execution! We set hasMoreTurns to true to send the response back
           hasMoreTurns = true;
-
-          // Clean stray pseudo code (like userData={ or call:...) from accumulatedText
-          accumulatedText = cleanPseudoStrings(accumulatedText)
-            .replace(/[a-zA-Z0-9_$]+\s*=\s*\{?\s*$/gi, "")
-            .trim();
-          updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
 
           if (currentLoaderDiv && currentLoaderDiv.parentNode === currentAssistantBubble) {
             currentLoaderDiv.remove();
@@ -2142,31 +1934,10 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           }
           scrollToBottom();
 
-          // 1. Add model's functionCall to chat history (sanitized & normalized)
-          const cleanModelParts = [];
-          const combinedModelText = cleanPseudoStrings(accumulatedText);
-          if (combinedModelText && combinedModelText.trim()) {
-            cleanModelParts.push({ text: combinedModelText.trim() });
-          }
-          if (activeFunctionCall && activeFunctionCall.name) {
-            cleanModelParts.push({
-              functionCall: {
-                name: String(activeFunctionCall.name),
-                args: (activeFunctionCall.args && typeof activeFunctionCall.args === 'object') ? activeFunctionCall.args : {}
-              }
-            });
-          }
-
+          // 1. Add model's functionCall to chat history (preserving thoughts text and signatures)
           chatHistory.push({
             role: "model",
-            parts: cleanModelParts.length > 0 ? cleanModelParts : [
-              {
-                functionCall: {
-                  name: String(activeFunctionCall.name),
-                  args: (activeFunctionCall.args && typeof activeFunctionCall.args === 'object') ? activeFunctionCall.args : {}
-                }
-              }
-            ]
+            parts: rawModelParts
           });
 
           // 2. Execute the tool
@@ -2223,19 +1994,21 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           scrollToBottom();
 
           // 3. Add functionResponse to chat history (with image attachment if it's get_page_screenshot)
-          const rawResponseData = { ...toolResult };
-          if (rawResponseData.screenshot_url) {
-            delete rawResponseData.screenshot_url; // Remove the massive base64 from the textual tool response
-          }
-          if (activeFunctionCall.name === "get_page_screenshot") {
-            rawResponseData.message = "Screenshot captured successfully and attached as an image part. Please analyze the image to answer.";
+          const cleanToolResult = { ...toolResult };
+          if (cleanToolResult.screenshot_url) {
+            delete cleanToolResult.screenshot_url; // Remove the massive base64 from the textual tool response
           }
 
           const responseParts = [
             {
               functionResponse: {
-                name: String(activeFunctionCall.name),
-                response: sanitizeToolResult(rawResponseData)
+                name: activeFunctionCall.name,
+                response: {
+                  ...cleanToolResult,
+                  message: activeFunctionCall.name === "get_page_screenshot" 
+                    ? "Screenshot captured successfully and attached as an image part. Please analyze the image to answer."
+                    : undefined
+                }
               }
             }
           ];
@@ -4840,7 +4613,6 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
 
   // Parses thinking blocks out of the text content
   function parseThinkingAndContent(text) {
-    text = cleanPseudoStrings(text);
     text = preprocessThinkingTags(text);
     const thinkingParts = [];
     let content = "";
@@ -4868,17 +4640,9 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
       }
     }
     
-    let thinking = thinkingParts.map(t => t.trim()).filter(Boolean).join("\n\n");
-    let trimmedContent = content.trim();
-
-    if (!trimmedContent && thinking) {
-      trimmedContent = thinking;
-      thinking = "";
-    }
-
     return {
-      thinking: thinking,
-      content: trimmedContent
+      thinking: thinkingParts.map(t => t.trim()).filter(Boolean).join("\n\n"),
+      content: content.trim()
     };
   }
 
