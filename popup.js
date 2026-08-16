@@ -846,10 +846,26 @@ document.addEventListener("DOMContentLoaded", () => {
   function isThinkingContext(text, inThinkingBlock) {
     if (inThinkingBlock) return true;
     if (!text) return false;
+    
+    // Check standard <thinking> tags
     const lastStart = text.lastIndexOf("<thinking>");
-    if (lastStart === -1) return false;
-    const lastEnd = text.lastIndexOf("</thinking>");
-    return lastEnd < lastStart;
+    if (lastStart !== -1) {
+      const lastEnd = text.lastIndexOf("</thinking>");
+      if (lastEnd < lastStart) return true;
+    }
+
+    // Check raw thoughts / reasoning prefix heuristics
+    const trimmed = text.trim();
+    if (/^\s*(Thought|thought|Thinking|thinking)\s*(:\s*|\n+\s*)/i.test(trimmed)) {
+      const match = trimmed.match(/^\s*(Thought|thought|Thinking|thinking)\s*(:\s*|\n+\s*)/i);
+      const rest = trimmed.substring(match[0].length);
+      const transitionRegex = /\n\n(?=[a-zA-Z]|\*\*|#|-|\*|\[)/;
+      if (!transitionRegex.test(rest)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   async function sendMessage() {
