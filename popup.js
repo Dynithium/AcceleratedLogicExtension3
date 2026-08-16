@@ -843,6 +843,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function isThinkingContext(text, inThinkingBlock) {
+    if (inThinkingBlock) return true;
+    if (!text) return false;
+    const lastStart = text.lastIndexOf("<thinking>");
+    if (lastStart === -1) return false;
+    const lastEnd = text.lastIndexOf("</thinking>");
+    return lastEnd < lastStart;
+  }
+
   async function sendMessage() {
     if (isGenerating) {
       if (currentAbortController) {
@@ -1001,6 +1010,7 @@ You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_
 
 CRITICAL RULES:
 - NATIVE TOOL CALLING: You MUST invoke tools strictly using native function declarations. NEVER output tool calls as raw text, pseudo-code strings, or text fragments like 'call:default_api:...', 'call:get_page_dom', or 'get_page_dom{}'.
+- THINKING AND TOOLS SEPARATION: Your internal thinking/reasoning (<thinking>...</thinking>) is strictly for internal reflection. NEVER attempt to call tools, invoke function declarations, or output function call requests inside thinking/reasoning blocks. Tool calls MUST ONLY be executed after thinking completes, outside of <thinking> tags.
 - Always output your internal step-by-step planning and thinking process enclosed exactly within <thinking> and </thinking> tags at the very start of your response.
 - Never output raw base64 data, gibberish strings, or repeating binary characters.
 - PAGE ANALYSIS RULE: When you open a page or perform a search, you MUST NOT just report that the page/search is opened. You MUST immediately proceed to call 'get_page_dom' (or 'get_page_screenshot') to read, analyze, and comprehend its actual content before moving on or concluding, unless the user explicitly said they only wanted to open the page.
@@ -1383,23 +1393,43 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                 if (choice) {
                   const delta = choice.delta;
                   if (delta) {
-                    if (delta.content) {
-                      accumulatedText += delta.content;
+                    const reasoning = delta.reasoning_content || delta.thought || delta.reasoning;
+                    if (reasoning) {
+                      if (!inThinkingBlock) {
+                        accumulatedText += "<thinking>" + reasoning;
+                        inThinkingBlock = true;
+                      } else {
+                        accumulatedText += reasoning;
+                      }
+                      updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
+                      scrollToBottom();
+                    } else if (delta.content) {
+                      if (inThinkingBlock) {
+                        accumulatedText += "</thinking>" + delta.content;
+                        inThinkingBlock = false;
+                      } else {
+                        accumulatedText += delta.content;
+                      }
                       updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
                       scrollToBottom();
                     }
                     if (delta.tool_calls) {
-                      delta.tool_calls.forEach(tc => {
-                        const idx = tc.index ?? 0;
-                        if (!openaiToolCalls[idx]) {
-                          openaiToolCalls[idx] = { id: "", name: "", arguments: "" };
-                        }
-                        if (tc.id) openaiToolCalls[idx].id = tc.id;
-                        if (tc.function) {
-                          if (tc.function.name) openaiToolCalls[idx].name += tc.function.name;
-                          if (tc.function.arguments) openaiToolCalls[idx].arguments += tc.function.arguments;
-                        }
-                      });
+                      const currentlyThinking = inThinkingBlock || isThinkingContext(accumulatedText, inThinkingBlock);
+                      if (!currentlyThinking) {
+                        delta.tool_calls.forEach(tc => {
+                          const idx = tc.index ?? 0;
+                          if (!openaiToolCalls[idx]) {
+                            openaiToolCalls[idx] = { id: "", name: "", arguments: "" };
+                          }
+                          if (tc.id) openaiToolCalls[idx].id = tc.id;
+                          if (tc.function) {
+                            if (tc.function.name) openaiToolCalls[idx].name += tc.function.name;
+                            if (tc.function.arguments) openaiToolCalls[idx].arguments += tc.function.arguments;
+                          }
+                        });
+                      } else {
+                        console.warn("Ignored OpenAI tool_call emitted inside thinking block:", delta.tool_calls);
+                      }
                     }
                   }
                 }
@@ -1825,12 +1855,12 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                   if (parts) {
                     rawModelParts.push(...parts);
                     for (const part of parts) {
+                      const isThoughtPart = !!part.thought;
                       if (part.text) {
-                        const isThought = !!part.thought;
-                        if (isThought && !inThinkingBlock) {
+                        if (isThoughtPart && !inThinkingBlock) {
                           accumulatedText += "<thinking>" + part.text;
                           inThinkingBlock = true;
-                        } else if (!isThought && inThinkingBlock) {
+                        } else if (!isThoughtPart && inThinkingBlock) {
                           accumulatedText += "</thinking>" + part.text;
                           inThinkingBlock = false;
                         } else {
@@ -1840,7 +1870,12 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                         scrollToBottom();
                       }
                       if (part.functionCall) {
-                        activeFunctionCall = part.functionCall;
+                        const currentlyThinking = isThoughtPart || inThinkingBlock || isThinkingContext(accumulatedText, inThinkingBlock);
+                        if (!currentlyThinking) {
+                          activeFunctionCall = part.functionCall;
+                        } else {
+                          console.warn("Ignored function call emitted inside model thinking block:", part.functionCall);
+                        }
                       }
                     }
                   }
@@ -1859,6 +1894,11 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             accumulatedText += "</thinking>";
             inThinkingBlock = false;
             updateAssistantBubble(currentAssistantBubble, currentLoaderDiv, accumulatedText);
+          }
+
+          if (activeFunctionCall && isThinkingContext(accumulatedText, false)) {
+            console.warn("Prevented tool call execution because it was enclosed within thinking tags:", activeFunctionCall);
+            activeFunctionCall = null;
           }
         }
 
