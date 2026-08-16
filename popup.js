@@ -157,7 +157,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let isGenerating = false;
   let currentAbortController = null;
 
-  // Handle copy buttons inside code blocks (MV3 CSP Compliant)
+  // Handle copy buttons inside code blocks and links (MV3 CSP Compliant)
   document.addEventListener("click", (e) => {
     if (e.target && e.target.classList.contains("code-copy-btn")) {
       const btn = e.target;
@@ -175,6 +175,18 @@ document.addEventListener("DOMContentLoaded", () => {
         }).catch(err => {
           console.error("Failed to copy:", err);
         });
+      }
+      return;
+    }
+
+    const link = e.target && (e.target.tagName === "A" ? e.target : e.target.closest("a"));
+    if (link && link.href) {
+      if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.create) {
+        e.preventDefault();
+        chrome.tabs.create({ url: link.href });
+      } else {
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
       }
     }
   });
@@ -2895,23 +2907,57 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
       return `<code class="inline-code">${code}</code>`;
     });
 
-    // 6. Parse Headers
+    // 6. Parse Headers (h1 through h6)
+    escaped = escaped.replace(/^###### (.*?)$/gm, '<h6>$1</h6>');
+    escaped = escaped.replace(/^##### (.*?)$/gm, '<h5>$1</h5>');
+    escaped = escaped.replace(/^#### (.*?)$/gm, '<h4>$1</h4>');
     escaped = escaped.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
     escaped = escaped.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
     escaped = escaped.replace(/^# (.*?)$/gm, '<h1>$1</h1>');
 
-    // 7. Bold & Italic
+    // 6.5 Horizontal Rules (---, ***, ___)
+    escaped = escaped.replace(/^(?:---|\*\*\*|___)\s*$/gm, '<hr class="chat-hr" />');
+
+    // 7. Bold, Italic & Strikethrough
+    escaped = escaped.replace(/~~([\s\S]+?)~~/g, '<del>$1</del>');
+    escaped = escaped.replace(/\*\*\*([\s\S]+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    escaped = escaped.replace(/___([\s\S]+?)___/g, '<strong><em>$1</em></strong>');
     escaped = escaped.replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>');
     escaped = escaped.replace(/__([\s\S]+?)__/g, '<strong>$1</strong>');
-    escaped = escaped.replace(/\*([\s\S]+?)\*/g, '<em>$1</em>');
-    escaped = escaped.replace(/_([\s\S]+?)_/g, '<em>$1</em>');
+    escaped = escaped.replace(/\*([^\*\n]+?)\*/g, '<em>$1</em>');
+    escaped = escaped.replace(/_([^_\n]+?)_/g, '<em>$1</em>');
 
-    // 8. Blockquotes
-    escaped = escaped.replace(/^&gt; (.*?)$/gm, '<blockquote>$1</blockquote>');
+    // 7.5 Images: ![alt](url)
+    escaped = escaped.replace(/!\[([^\]]*)\]\(((?:https?:\/\/|data:image\/|\/)[^)\s]+)\)/g, (match, alt, url) => {
+      return `<img src="${url}" alt="${alt}" class="chat-inline-img" loading="lazy" referrerpolicy="no-referrer" />`;
+    });
 
-    // 9. Lists
+    // 7.6 Markdown Links: [text](url)
+    escaped = escaped.replace(/\[([^\]]+)\]\(((?:https?:\/\/|mailto:|chrome-extension:\/\/|\/|#|www\.)[^)\s]+)\)/g, (match, label, url) => {
+      const href = url.startsWith("www.") ? "https://" + url : url;
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="chat-link">${label}</a>`;
+    });
+
+    // 7.7 Autolink raw URLs
+    escaped = escaped.replace(/(^|[\s\(\[\{>])(https?:\/\/[^\s<>\)\]\}]+)/g, (match, prefix, url) => {
+      let cleanUrl = url;
+      let trailingPunct = "";
+      const punctMatch = cleanUrl.match(/[.,;:]+$/);
+      if (punctMatch) {
+        trailingPunct = punctMatch[0];
+        cleanUrl = cleanUrl.slice(0, -trailingPunct.length);
+      }
+      return `${prefix}<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" class="chat-link">${cleanUrl}</a>${trailingPunct}`;
+    });
+
+    // 8. Task Checklists & Lists
+    escaped = escaped.replace(/^\s*[-*]\s+\[ \]\s+(.*?)$/gm, '<li class="task-item unchecked"><input type="checkbox" disabled /> <span>$1</span></li>');
+    escaped = escaped.replace(/^\s*[-*]\s+\[[xX]\]\s+(.*?)$/gm, '<li class="task-item checked"><input type="checkbox" checked disabled /> <span>$1</span></li>');
     escaped = escaped.replace(/^\s*[-*]\s+(.*?)$/gm, '<li>$1</li>');
     escaped = escaped.replace(/^\s*\d+\.\s+(.*?)$/gm, '<li class="ordered">$1</li>');
+
+    // 8.5 Blockquotes
+    escaped = escaped.replace(/^&gt; (.*?)$/gm, '<blockquote>$1</blockquote>');
 
     // 9.5 Parse Tables
     const linesArr = escaped.split(/\r?\n/);
@@ -3014,6 +3060,7 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
           line.startsWith("<h") || 
           line.startsWith("<blockquote") ||
           line.startsWith("<li") ||
+          line.startsWith("<hr") ||
           line.startsWith("<div class=\"table-container\"")) {
         return line;
       }
@@ -3024,10 +3071,15 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
     escaped = formattedParagraphs.filter(Boolean).join("\n");
 
     // 11. Group adjacent list items
-    escaped = escaped.replace(/(<li>.*?<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
-    escaped = escaped.replace(/(<li class="ordered">.*?<\/li>\n?)+/g, (match) => {
-      const clean = match.replace(/ class="ordered"/g, '');
-      return `<ol>${clean}</ol>`;
+    escaped = escaped.replace(/(<li(?: class="[^"]*")?>.*?<\/li>\n?)+/g, (match) => {
+      if (match.includes('class="ordered"')) {
+        const clean = match.replace(/ class="ordered"/g, '');
+        return `<ol>${clean}</ol>`;
+      }
+      if (match.includes('class="task-item')) {
+        return `<ul class="task-list">${match}</ul>`;
+      }
+      return `<ul>${match}</ul>`;
     });
 
     // 12. Re-insert Code Blocks with copy buttons

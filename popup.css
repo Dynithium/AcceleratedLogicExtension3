@@ -808,7 +808,7 @@ body {
   margin-bottom: 0;
 }
 
-.bubble-answer h1, .bubble-answer h2, .bubble-answer h3 {
+.bubble-answer h1, .bubble-answer h2, .bubble-answer h3, .bubble-answer h4, .bubble-answer h5, .bubble-answer h6 {
   color: #f8fafc;
   font-weight: 600;
   margin-top: 12px;
@@ -818,6 +818,20 @@ body {
 .bubble-answer h1 { font-size: 1.15rem; }
 .bubble-answer h2 { font-size: 1.05rem; }
 .bubble-answer h3 { font-size: 0.95rem; }
+.bubble-answer h4 { font-size: 0.875rem; color: #cbd5e1; }
+.bubble-answer h5 { font-size: 0.825rem; color: #cbd5e1; }
+.bubble-answer h6 { font-size: 0.775rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }
+
+.bubble-answer hr.chat-hr {
+  border: 0;
+  border-top: 1px solid #334155;
+  margin: 12px 0;
+}
+
+.bubble-answer del {
+  color: #64748b;
+  text-decoration: line-through;
+}
 
 .bubble-answer ul, .bubble-answer ol {
   margin-bottom: 8px;
@@ -831,6 +845,27 @@ body {
 }
 .bubble-answer li {
   margin-bottom: 4px;
+}
+
+/* Task Checklists */
+.bubble-answer ul.task-list {
+  list-style-type: none;
+  padding-left: 4px;
+}
+.bubble-answer li.task-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.bubble-answer li.task-item input[type="checkbox"] {
+  margin-top: 3px;
+  accent-color: #3b82f6;
+  cursor: default;
+}
+.bubble-answer li.task-item.checked span {
+  text-decoration: line-through;
+  color: #64748b;
 }
 
 .bubble-answer blockquote {
@@ -891,6 +926,35 @@ body {
   padding: 1px 4px;
   border-radius: 4px;
   border: 1px solid rgba(244, 63, 94, 0.15);
+}
+
+/* Hyperlinks in Chat */
+.chat-link, .bubble-answer a, .message-bubble a {
+  color: #60a5fa;
+  text-decoration: underline;
+  text-decoration-color: rgba(96, 165, 250, 0.45);
+  text-underline-offset: 3px;
+  font-weight: 500;
+  transition: all 0.15s ease-in-out;
+  word-break: break-word;
+  cursor: pointer;
+}
+
+.chat-link:hover, .bubble-answer a:hover, .message-bubble a:hover {
+  color: #93c5fd;
+  text-decoration-color: #93c5fd;
+  background-color: rgba(59, 130, 246, 0.12);
+  border-radius: 3px;
+}
+
+/* Inline images in chat markdown */
+.chat-inline-img {
+  max-width: 100%;
+  max-height: 280px;
+  border-radius: 8px;
+  margin: 6px 0;
+  border: 1px solid #334155;
+  display: block;
 }
 
 /* Beautiful Code Blocks with Copy button */
