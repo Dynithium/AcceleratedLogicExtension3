@@ -1,5 +1,94 @@
 // AcceleratedLogic AI - Popup Controller
 
+// Polyfill chrome APIs for browser preview & standalone execution
+if (typeof window !== "undefined") {
+  if (typeof window.chrome === "undefined") {
+    window.chrome = {};
+  }
+  if (!window.chrome.storage || !window.chrome.storage.local) {
+    window.chrome.storage = {
+      local: {
+        get: (keys, callback) => {
+          const result = {};
+          const keyList = Array.isArray(keys) ? keys : (typeof keys === "string" ? [keys] : Object.keys(keys || {}));
+          for (const k of keyList) {
+            const val = localStorage.getItem("al_ai_" + k);
+            if (val !== null) {
+              try {
+                result[k] = JSON.parse(val);
+              } catch (e) {
+                result[k] = val;
+              }
+            }
+          }
+          if (callback) callback(result);
+          return Promise.resolve(result);
+        },
+        set: (items, callback) => {
+          for (const [k, v] of Object.entries(items || {})) {
+            localStorage.setItem("al_ai_" + k, JSON.stringify(v));
+          }
+          if (callback) callback();
+          return Promise.resolve();
+        }
+      }
+    };
+  }
+  if (!window.chrome.tabs) {
+    window.chrome.tabs = {
+      query: (queryInfo, callback) => {
+        const tabs = [{
+          id: 1,
+          title: document.title || "AcceleratedLogic AI",
+          url: window.location.href,
+          active: true
+        }];
+        if (callback) callback(tabs);
+        return Promise.resolve(tabs);
+      },
+      sendMessage: (tabId, message, callback) => {
+        if (callback) callback({ status: "ok" });
+        return Promise.resolve({ status: "ok" });
+      },
+      update: (tabId, updateProps, callback) => {
+        if (callback) callback({ id: tabId, ...updateProps });
+        return Promise.resolve({ id: tabId, ...updateProps });
+      },
+      create: (createProps, callback) => {
+        if (createProps && createProps.url) window.open(createProps.url, "_blank");
+        if (callback) callback({ id: 2, ...createProps });
+        return Promise.resolve({ id: 2, ...createProps });
+      },
+      captureVisibleTab: (windowId, options, callback) => {
+        // Return dummy transparent 1x1 png canvas data if running outside extension
+        const canvas = document.createElement("canvas");
+        canvas.width = 300;
+        canvas.height = 200;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.fillStyle = "#1e293b";
+          ctx.fillRect(0, 0, 300, 200);
+          ctx.fillStyle = "#94a3b8";
+          ctx.font = "14px sans-serif";
+          ctx.fillText("Tab Viewport Preview", 80, 105);
+        }
+        const dataUrl = canvas.toDataURL("image/png");
+        if (callback) callback(dataUrl);
+        return Promise.resolve(dataUrl);
+      }
+    };
+  }
+  if (!window.chrome.scripting) {
+    window.chrome.scripting = {
+      executeScript: (injection, callback) => {
+        const res = [{ result: { title: document.title, url: window.location.href, text: "AcceleratedLogic AI context" } }];
+        if (callback) callback(res);
+        return Promise.resolve(res);
+      }
+    };
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   // DOM Elements
   const btnSettings = document.getElementById("btn-settings");
@@ -619,6 +708,87 @@ document.addEventListener("DOMContentLoaded", () => {
     plusMenu.classList.add("hidden");
   });
 
+  // Quick Tools Bar Chips Listener
+  document.querySelectorAll(".tool-chip-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const action = btn.getAttribute("data-tool-action");
+      if (action === "extract-tables") {
+        promptInput.value = "Extract all tabular and grid data on this page into structured CSV and JSON format.";
+        promptInput.dispatchEvent(new Event("input"));
+        btnSend.click();
+      } else if (action === "highlight-cta") {
+        promptInput.value = "Identify and visually highlight the main call-to-action buttons, interactive links, and input forms on this page with glowing violet borders.";
+        promptInput.dispatchEvent(new Event("input"));
+        btnSend.click();
+      } else if (action === "search-tabs") {
+        promptInput.value = "Search across all my open browser tabs and summarize what pages are currently active.";
+        promptInput.dispatchEvent(new Event("input"));
+        btnSend.click();
+      } else if (action === "capture-tab") {
+        menuCapturePage.click();
+      }
+    });
+  });
+
+  // Extra Plus Menu Items
+  const menuExtractTables = document.getElementById("menu-extract-tables");
+  const menuHighlightElements = document.getElementById("menu-highlight-elements");
+  const menuSearchTabs = document.getElementById("menu-search-tabs");
+  const btnExportChats = document.getElementById("btn-export-chats");
+
+  if (menuExtractTables) {
+    menuExtractTables.addEventListener("click", () => {
+      plusMenu.classList.add("hidden");
+      promptInput.value = "Extract all tables on this page to structured CSV.";
+      promptInput.dispatchEvent(new Event("input"));
+      btnSend.click();
+    });
+  }
+
+  if (menuHighlightElements) {
+    menuHighlightElements.addEventListener("click", () => {
+      plusMenu.classList.add("hidden");
+      promptInput.value = "Highlight the most important elements, headings, and input areas on this web page.";
+      promptInput.dispatchEvent(new Event("input"));
+      btnSend.click();
+    });
+  }
+
+  if (menuSearchTabs) {
+    menuSearchTabs.addEventListener("click", () => {
+      plusMenu.classList.add("hidden");
+      promptInput.value = "List and search all open browser tabs.";
+      promptInput.dispatchEvent(new Event("input"));
+      btnSend.click();
+    });
+  }
+
+  if (btnExportChats) {
+    btnExportChats.addEventListener("click", () => {
+      if (!chatHistory || chatHistory.length === 0) {
+        showToast("No chat messages to export yet.");
+        return;
+      }
+      let mdContent = `# AcceleratedLogic AI Chat Export\n*Exported on ${new Date().toLocaleString()}*\n\n---\n\n`;
+      chatHistory.forEach(msg => {
+        const roleName = msg.role === "user" ? "👤 User" : "⚡ AcceleratedLogic AI";
+        const textParts = msg.parts ? msg.parts.map(p => p.text || "").join("\n") : "";
+        mdContent += `### ${roleName}\n\n${textParts}\n\n---\n\n`;
+      });
+
+      const blob = new Blob([mdContent], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `chat-export-${Date.now()}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast("Chat exported as Markdown!");
+    });
+  }
+
   // Upload File selected from menu
   menuUploadFile.addEventListener("click", () => {
     hiddenFileInput.click();
@@ -999,12 +1169,15 @@ document.addEventListener("DOMContentLoaded", () => {
         activeModel = inputCustomModel.value.trim() || "gemini-2.5-flash";
       }
 
-      // We run a recursive loop to allow multiple turns of tool execution if requested
+      // We run an autonomous multi-step agent loop to allow chaining sequential tool executions (up to MAX_AGENT_STEPS turns)
       let hasMoreTurns = true;
       let currentAssistantBubble = assistantBubble;
       let currentLoaderDiv = loaderDiv;
+      const MAX_AGENT_STEPS = 30;
+      let currentStepCount = 0;
 
-      while (hasMoreTurns) {
+      while (hasMoreTurns && currentStepCount < MAX_AGENT_STEPS) {
+        currentStepCount++;
         if (currentAbortController && currentAbortController.signal.aborted) {
           throw new DOMException("Generation stopped by user.", "AbortError");
         }
@@ -1021,8 +1194,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const isVisionCapable = apiProvider === "gemini" || !!openaiCapabilities?.vision;
         const systemInstructionText = `You are AcceleratedLogic, an advanced browser assistant Chrome Extension.
-You help users analyze web pages, answer questions, and perform research.
-You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'scroll_page' to scroll up/down/left/right, 'open_tab' to open a new tab with a specific URL, 'search_web' to perform search queries, 'list_tabs' to list open tabs, 'switch_tab' to switch between tabs, 'press_key' to simulate pressing keys on the webpage, 'select_text' to select/highlight text, and 'replace_text' to replace text.
+You help users analyze web pages, answer questions, extract data, automate tasks, and perform deep research.
+You can call 'get_page_dom' to get webpage text${isVisionCapable ? ", 'get_page_screenshot' to get a visual screenshot" : ""}, 'click_element' to interact with buttons/links, 'click_at_coordinate' to click at custom screen coordinates and optionally type, 'type_text' to fill out input fields, 'fill_form' to batch-fill multiple form fields, textareas, and checkboxes in one atomic action, 'execute_custom_script' to run custom JavaScript snippets in the webpage context, 'wait_for_condition' to poll and wait for dynamic elements or text to load, 'crawl_links' to discover and follow hyperlinks across pages, 'get_page_meta_seo' to extract structured JSON-LD schemas and SEO metadata, 'update_plan' to maintain a multi-phase long-horizon execution plan, 'manage_scratchpad' to store and retrieve working memory across research phases, 'scroll_page' to scroll up/down/left/right, 'highlight_element' to visually draw animated glowing bounding boxes and labels around elements, 'extract_table_data' to convert web tables directly into clean JSON, CSV, or Markdown, 'extract_media' to scrape all images, videos, audio, and downloadable files, 'compare_tabs' to compare content between two open browser tabs, 'tts_speak' to read summaries aloud via voice synthesis, 'download_markdown_report' to export research files, 'open_tab' to open a new tab with a specific URL, 'search_web' to perform search queries, 'list_tabs' to list open tabs, 'search_tabs' to search open tabs by query, 'switch_tab' to switch between tabs, 'close_tab' to close a tab, 'press_key' to simulate pressing keys on the webpage, 'select_text' to select/highlight text, and 'replace_text' to replace text.
+
+LONG-HORIZON AUTONOMOUS AGENT LOOP:
+You are an autonomous agent capable of chaining up to 30 sequential tool turns to complete complex, multi-phase goals.
+- For deep research or complex automation, use 'update_plan' at the beginning to declare your milestones and track progress as you complete each phase.
+- Use 'manage_scratchpad' to save critical facts, URLs, and intermediate table data across turns so you don't lose context.
+- Use 'wait_for_condition' when waiting for dynamic SPAs, animations, or async search results to render.
+- Use 'execute_custom_script' whenever standard tools require deeper programmatic inspection of the DOM.
+- Use 'crawl_links' to systematically inspect linked documentation, sub-pages, or product listings.
+- After each tool output is returned to you, evaluate the results against your plan, decide your next action, and execute the next tool immediately until the final goal is met.
 
 CRITICAL RULES:
 - NATIVE TOOL CALLING: You MUST invoke tools strictly using native function declarations. NEVER output tool calls as raw text, pseudo-code strings, or text fragments like 'call:default_api:...', 'call:get_page_dom', or 'get_page_dom{}'.
@@ -1031,10 +1213,12 @@ CRITICAL RULES:
 - Never output raw base64 data, gibberish strings, or repeating binary characters.
 - PAGE ANALYSIS RULE: When you open a page or perform a search, you MUST NOT just report that the page/search is opened. You MUST immediately proceed to call 'get_page_dom' (or 'get_page_screenshot') to read, analyze, and comprehend its actual content before moving on or concluding, unless the user explicitly said they only wanted to open the page.
 - REAL-TIME SEARCH RULE: If you are unsure of any answer, or need to retrieve current/real-time information, you MUST use 'search_web' to search, then open or switch to relevant result tabs and extract their text using 'get_page_dom' to analyze the findings. Never speculate or give generic answers without verifying.
-- MULTI-TAB NAVIGATION: You know what each tab is and can switch tabs if needed. Use 'list_tabs' to view all open tabs (IDs, titles, URLs, active status) and use 'switch_tab' to change the active tab when a user asks about another tab, or when you need to gather information from a different open page.
-- NON-DOM INTERACTIVE KEYPRESS RULE: If you are interacting with canvas-based elements, browser games, or non-input interactive areas where WASD or other key actions are required to move or interact (such as playing games, interactive canvases, sliding controls, etc.), use the 'press_key' tool to send raw keyboard presses directly to the page instead of standard 'type_text'.
-- VERIFICATION RULE: After executing an interactive action that modifies page state (such as 'type_text', 'replace_text', 'press_key', 'click_element', or 'click_at_coordinate'), you MUST explicitly verify that your action completed correctly. Do this by calling 'get_page_dom' (or 'get_page_screenshot') immediately after the action to inspect the updated page state and confirm the expected change (e.g., verifying text was input, checking that a modal opened, or confirming that text selection/replacement has occurred). Never just assume an action worked without checking the page's state.
-- ACTION DOUBLE-CHECK: The AI should check if it actually did something correctly in the end. You MUST run a final verification check (fetching updated DOM/screenshot) after typing or clicking to confirm the input is visible, the page updated, or the action fully registered before concluding your response to the user.
+- MULTI-TAB NAVIGATION: You know what each tab is and can switch tabs if needed. Use 'list_tabs' or 'search_tabs' to view open tabs, 'compare_tabs' to contrast two tabs, and 'switch_tab' to change the active tab when gathering information from different pages.
+- TABLE DATA EXTRACTION: When user asks for data in tables, pricing grids, statistics, or CSV/JSON conversions, call 'extract_table_data' to automatically parse table structures.
+- FORM FILLING: When filling multiple inputs or forms, use 'fill_form' to atomically fill all target fields at once.
+- ELEMENT HIGHLIGHTING: When pointing out key features, buttons, fields, or answers on the page, use 'highlight_element' to draw a glowing border and label badge so the user can easily see what you are referring to.
+- NON-DOM INTERACTIVE KEYPRESS RULE: If you are interacting with canvas-based elements, browser games, or non-input interactive areas where WASD or other key actions are required to move or interact, use the 'press_key' tool to send raw keyboard presses directly.
+- VERIFICATION RULE: After executing an interactive action that modifies page state (such as 'fill_form', 'type_text', 'replace_text', 'press_key', 'click_element', or 'click_at_coordinate'), you MUST explicitly verify that your action completed correctly by calling 'get_page_dom' or 'get_page_screenshot' immediately after the action.
 ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the screenshot image as inlineData in the next user turn. Analyze the screenshot visually and describe it naturally.\n" : ""}- Keep explanations conversational, elegant, and markdown-formatted.`;
 
         if (apiProvider === "openai-compatible") {
@@ -1355,6 +1539,255 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     textContext: { type: "string", description: "Optional text context inside the element to match." }
                   },
                   required: ["selector"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "highlight_element",
+                description: "Visually highlights an element on the webpage with an animated glowing border, optional badge label, and scrolls it into view for the user.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    selector: { type: "string", description: "CSS selector of the element to highlight." },
+                    color: { type: "string", description: "Optional hex or rgba color for the glowing highlight (e.g. '#8b5cf6', '#3b82f6', '#10b981'). Defaults to '#8b5cf6'." },
+                    durationMs: { type: "number", description: "Duration in milliseconds to display the highlight (e.g. 4000). Set to 0 to keep until dismiss. Defaults to 4000." },
+                    label: { type: "string", description: "Optional text label/badge to display directly above the element." },
+                    scrollIntoView: { type: "boolean", description: "Whether to smoothly scroll the highlighted element into view. Defaults to true." }
+                  },
+                  required: ["selector"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "extract_table_data",
+                description: "Extracts tabular data from web tables or grid structures and formats it into structured JSON, CSV, or Markdown.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    selector: { type: "string", description: "Optional CSS selector of the table element (e.g. 'table', '#pricing', '.data-grid'). If omitted, extracts the primary table on page." },
+                    format: { type: "string", enum: ["json", "csv", "markdown"], description: "Format of the extracted table data. Defaults to 'json'." },
+                    maxRows: { type: "number", description: "Maximum number of data rows to extract. Defaults to 100." }
+                  }
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "search_tabs",
+                description: "Searches open browser tabs by title or URL keyword and returns matching tabs with their IDs.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    query: { type: "string", description: "Search query or keyword to match against tab titles and URLs." }
+                  },
+                  required: ["query"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "close_tab",
+                description: "Closes a specific browser tab by its unique tab ID, or the active tab if omitted.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    tabId: { type: "number", description: "Optional tab ID to close. If omitted, closes the active tab." }
+                  }
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "fill_form",
+                description: "Fills multiple input fields, textareas, checkboxes, radio buttons, and select dropdowns across the page in one single atomic operation.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    fields: {
+                      type: "array",
+                      description: "List of form fields to fill.",
+                      items: {
+                        type: "object",
+                        properties: {
+                          selector: { type: "string", description: "Optional CSS selector of the field." },
+                          name: { type: "string", description: "Optional name or ID attribute of the form field." },
+                          label: { type: "string", description: "Optional label text, placeholder, or aria-label of the input." },
+                          value: { type: "string", description: "Value to enter or select. For checkboxes use 'true'/'false'." }
+                        },
+                        required: ["value"]
+                      }
+                    },
+                    submitAfter: { type: "boolean", description: "Whether to click the form's submit button after filling. Defaults to false." }
+                  },
+                  required: ["fields"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "extract_media",
+                description: "Scrapes and extracts all media on the active webpage including images (URLs, alt text, dimensions), videos, audio, and downloadable files (PDF, zip, docx, etc.).",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    type: { type: "string", enum: ["all", "images", "videos", "audio", "documents"], description: "Type of media assets to extract. Defaults to 'all'." },
+                    minDimensions: { type: "number", description: "Minimum width/height in px for images to filter out tiny icons. Defaults to 50." }
+                  }
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "compare_tabs",
+                description: "Compares text and metadata between two open browser tabs side-by-side (e.g. comparing products, documentation, or search results).",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    tabIdA: { type: "number", description: "First tab ID to compare." },
+                    tabIdB: { type: "number", description: "Second tab ID to compare. If omitted, uses the active tab." }
+                  },
+                  required: ["tabIdA"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "tts_speak",
+                description: "Reads text aloud using text-to-speech browser voice synthesis.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    text: { type: "string", description: "The text to read aloud." },
+                    rate: { type: "number", description: "Speech rate (0.5 to 2.0). Defaults to 1.0." },
+                    pitch: { type: "number", description: "Voice pitch (0.5 to 1.5). Defaults to 1.0." }
+                  },
+                  required: ["text"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "download_markdown_report",
+                description: "Generates and triggers a browser download for a structured Markdown report or research summary file.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    filename: { type: "string", description: "File name for the download (e.g. 'research-summary.md')." },
+                    markdownContent: { type: "string", description: "The complete Markdown text content to save." }
+                  },
+                  required: ["filename", "markdownContent"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "update_plan",
+                description: "Maintains and tracks a multi-step plan for long-horizon tasks, declaring sub-goals and updating status ('pending', 'in_progress', 'completed', 'failed').",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    plan: {
+                      type: "array",
+                      description: "Array of milestone sub-goals.",
+                      items: {
+                        type: "object",
+                        properties: {
+                          step: { type: "number", description: "Step number (1, 2, 3...)" },
+                          goal: { type: "string", description: "Description of the milestone goal." },
+                          status: { type: "string", enum: ["pending", "in_progress", "completed", "failed"], description: "Current step status." },
+                          notes: { type: "string", description: "Optional notes or outcome summary." }
+                        },
+                        required: ["step", "goal", "status"]
+                      }
+                    },
+                    currentStepIndex: { type: "number", description: "The 1-based index of the currently executing step." }
+                  },
+                  required: ["plan"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "manage_scratchpad",
+                description: "Manages working memory across long-horizon research sessions to store, append, retrieve, or clear intermediate facts, extracted data, and URLs.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    action: { type: "string", enum: ["read", "write", "append", "clear"], description: "Action to perform on scratchpad working memory." },
+                    key: { type: "string", description: "Optional key or section name (e.g. 'findings', 'pricing_table', 'sources'). Defaults to 'default'." },
+                    content: { type: "string", description: "Content text to write or append." }
+                  },
+                  required: ["action"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "execute_custom_script",
+                description: "Executes a custom JavaScript snippet in the webpage context and returns the JSON result for advanced DOM querying or deep page manipulation.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    code: { type: "string", description: "JavaScript code string to execute (e.g., 'return Array.from(document.querySelectorAll(\"h2\")).map(el => el.textContent.trim());')." }
+                  },
+                  required: ["code"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "wait_for_condition",
+                description: "Pauses and polls for dynamic web page elements or text conditions to appear before continuing (useful for SPAs, pagination, and ajax updates).",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    selector: { type: "string", description: "Optional CSS selector to wait for." },
+                    textIncludes: { type: "string", description: "Optional text content to wait for." },
+                    timeoutMs: { type: "number", description: "Max time in milliseconds to wait (100 to 10000). Defaults to 3000." }
+                  }
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "crawl_links",
+                description: "Discovers and extracts structured anchor links and navigation paths matching a filter from the current page for deep exploration.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    selector: { type: "string", description: "CSS selector for target links (e.g. 'article a', '.documentation a'). Defaults to 'a[href]'." },
+                    keywordFilter: { type: "string", description: "Optional filter keyword for URL or link text." },
+                    limit: { type: "number", description: "Max links to return (up to 50). Defaults to 20." }
+                  }
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "get_page_meta_seo",
+                description: "Extracts complete page metadata including OpenGraph cards, Twitter preview tags, JSON-LD schemas, canonical URL, and heading hierarchy (H1-H4).",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    includeJsonLd: { type: "boolean", description: "Whether to include raw parsed JSON-LD schemas. Defaults to true." }
+                  }
                 }
               }
             }
@@ -1792,6 +2225,210 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
                     },
                     required: ["selector"]
                   }
+                },
+                {
+                  name: "highlight_element",
+                  description: "Visually highlights an element on the webpage with an animated glowing border, optional badge label, and scrolls it into view for the user.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      selector: { type: "STRING", description: "CSS selector of the element to highlight." },
+                      color: { type: "STRING", description: "Optional hex or rgba color for the glowing highlight (e.g. '#8b5cf6', '#3b82f6', '#10b981'). Defaults to '#8b5cf6'." },
+                      durationMs: { type: "INTEGER", description: "Duration in milliseconds to display the highlight (e.g. 4000). Set to 0 to keep until dismiss. Defaults to 4000." },
+                      label: { type: "STRING", description: "Optional text label/badge to display directly above the element." },
+                      scrollIntoView: { type: "BOOLEAN", description: "Whether to smoothly scroll the highlighted element into view. Defaults to true." }
+                    },
+                    required: ["selector"]
+                  }
+                },
+                {
+                  name: "extract_table_data",
+                  description: "Extracts tabular data from web tables or grid structures and formats it into structured JSON, CSV, or Markdown.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      selector: { type: "STRING", description: "Optional CSS selector of the table element (e.g. 'table', '#pricing', '.data-grid'). If omitted, extracts the primary table on page." },
+                      format: { type: "STRING", description: "Format of the extracted table data ('json', 'csv', or 'markdown'). Defaults to 'json'." },
+                      maxRows: { type: "INTEGER", description: "Maximum number of data rows to extract. Defaults to 100." }
+                    }
+                  }
+                },
+                {
+                  name: "search_tabs",
+                  description: "Searches open browser tabs by title or URL keyword and returns matching tabs with their IDs.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      query: { type: "STRING", description: "Search query or keyword to match against tab titles and URLs." }
+                    },
+                    required: ["query"]
+                  }
+                },
+                {
+                  name: "close_tab",
+                  description: "Closes a specific browser tab by its unique tab ID, or the active tab if omitted.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      tabId: { type: "INTEGER", description: "Optional tab ID to close. If omitted, closes the active tab." }
+                    }
+                  }
+                },
+                {
+                  name: "fill_form",
+                  description: "Fills multiple input fields, textareas, checkboxes, radio buttons, and select dropdowns across the page in one single atomic operation.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      fields: {
+                        type: "ARRAY",
+                        description: "List of form fields to fill.",
+                        items: {
+                          type: "OBJECT",
+                          properties: {
+                            selector: { type: "STRING", description: "Optional CSS selector of the field." },
+                            name: { type: "STRING", description: "Optional name or ID attribute of the form field." },
+                            label: { type: "STRING", description: "Optional label text, placeholder, or aria-label of the input." },
+                            value: { type: "STRING", description: "Value to enter or select. For checkboxes use 'true'/'false'." }
+                          },
+                          required: ["value"]
+                        }
+                      },
+                      submitAfter: { type: "BOOLEAN", description: "Whether to click the form's submit button after filling. Defaults to false." }
+                    },
+                    required: ["fields"]
+                  }
+                },
+                {
+                  name: "extract_media",
+                  description: "Scrapes and extracts all media on the active webpage including images (URLs, alt text, dimensions), videos, audio, and downloadable files (PDF, zip, docx, etc.).",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      type: { type: "STRING", description: "Type of media assets to extract ('all', 'images', 'videos', 'audio', 'documents'). Defaults to 'all'." },
+                      minDimensions: { type: "INTEGER", description: "Minimum width/height in px for images to filter out tiny icons. Defaults to 50." }
+                    }
+                  }
+                },
+                {
+                  name: "compare_tabs",
+                  description: "Compares text and metadata between two open browser tabs side-by-side (e.g. comparing products, documentation, or search results).",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      tabIdA: { type: "INTEGER", description: "First tab ID to compare." },
+                      tabIdB: { type: "INTEGER", description: "Second tab ID to compare. If omitted, uses the active tab." }
+                    },
+                    required: ["tabIdA"]
+                  }
+                },
+                {
+                  name: "tts_speak",
+                  description: "Reads text aloud using text-to-speech browser voice synthesis.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      text: { type: "STRING", description: "The text to read aloud." },
+                      rate: { type: "NUMBER", description: "Speech rate (0.5 to 2.0). Defaults to 1.0." },
+                      pitch: { type: "NUMBER", description: "Voice pitch (0.5 to 1.5). Defaults to 1.0." }
+                    },
+                    required: ["text"]
+                  }
+                },
+                {
+                  name: "download_markdown_report",
+                  description: "Generates and triggers a browser download for a structured Markdown report or research summary file.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      filename: { type: "STRING", description: "File name for the download (e.g. 'research-summary.md')." },
+                      markdownContent: { type: "STRING", description: "The complete Markdown text content to save." }
+                    },
+                    required: ["filename", "markdownContent"]
+                  }
+                },
+                {
+                  name: "update_plan",
+                  description: "Maintains and tracks a multi-step plan for long-horizon tasks, declaring sub-goals and updating status ('pending', 'in_progress', 'completed', 'failed').",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      plan: {
+                        type: "ARRAY",
+                        description: "Array of milestone sub-goals.",
+                        items: {
+                          type: "OBJECT",
+                          properties: {
+                            step: { type: "INTEGER", description: "Step number (1, 2, 3...)" },
+                            goal: { type: "STRING", description: "Description of the milestone goal." },
+                            status: { type: "STRING", description: "Current step status ('pending', 'in_progress', 'completed', 'failed')." },
+                            notes: { type: "STRING", description: "Optional notes or outcome summary." }
+                          },
+                          required: ["step", "goal", "status"]
+                        }
+                      },
+                      currentStepIndex: { type: "INTEGER", description: "The 1-based index of the currently executing step." }
+                    },
+                    required: ["plan"]
+                  }
+                },
+                {
+                  name: "manage_scratchpad",
+                  description: "Manages working memory across long-horizon research sessions to store, append, retrieve, or clear intermediate facts, extracted data, and URLs.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      action: { type: "STRING", description: "Action to perform ('read', 'write', 'append', 'clear')." },
+                      key: { type: "STRING", description: "Optional key or section name (e.g. 'findings', 'pricing_table', 'sources'). Defaults to 'default'." },
+                      content: { type: "STRING", description: "Content text to write or append." }
+                    },
+                    required: ["action"]
+                  }
+                },
+                {
+                  name: "execute_custom_script",
+                  description: "Executes a custom JavaScript snippet in the webpage context and returns the JSON result for advanced DOM querying or deep page manipulation.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      code: { type: "STRING", description: "JavaScript code string to execute (e.g., 'return Array.from(document.querySelectorAll(\"h2\")).map(el => el.textContent.trim());')." }
+                    },
+                    required: ["code"]
+                  }
+                },
+                {
+                  name: "wait_for_condition",
+                  description: "Pauses and polls for dynamic web page elements or text conditions to appear before continuing (useful for SPAs, pagination, and ajax updates).",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      selector: { type: "STRING", description: "Optional CSS selector to wait for." },
+                      textIncludes: { type: "STRING", description: "Optional text content to wait for." },
+                      timeoutMs: { type: "INTEGER", description: "Max time in milliseconds to wait (100 to 10000). Defaults to 3000." }
+                    }
+                  }
+                },
+                {
+                  name: "crawl_links",
+                  description: "Discovers and extracts structured anchor links and navigation paths matching a filter from the current page for deep exploration.",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      selector: { type: "STRING", description: "CSS selector for target links (e.g. 'article a', '.documentation a'). Defaults to 'a[href]'." },
+                      keywordFilter: { type: "STRING", description: "Optional filter keyword for URL or link text." },
+                      limit: { type: "INTEGER", description: "Max links to return (up to 50). Defaults to 20." }
+                    }
+                  }
+                },
+                {
+                  name: "get_page_meta_seo",
+                  description: "Extracts complete page metadata including OpenGraph cards, Twitter preview tags, JSON-LD schemas, canonical URL, and heading hierarchy (H1-H4).",
+                  parameters: {
+                    type: "OBJECT",
+                    properties: {
+                      includeJsonLd: { type: "BOOLEAN", description: "Whether to include raw parsed JSON-LD schemas. Defaults to true." }
+                    }
+                  }
                 }
               ]
             }]
@@ -2044,6 +2681,38 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               note = `Navigated browser history ${activeFunctionCall.args?.direction || "back"}.`;
             } else if (activeFunctionCall.name === "get_element_details") {
               note = `Inspected details for selector "${activeFunctionCall.args?.selector || ""}".`;
+            } else if (activeFunctionCall.name === "highlight_element") {
+              note = `Highlighted element "${activeFunctionCall.args?.selector || ""}" on page.`;
+            } else if (activeFunctionCall.name === "extract_table_data") {
+              note = `Extracted table data (${toolResult.rowCount || 0} rows).`;
+            } else if (activeFunctionCall.name === "search_tabs") {
+              note = `Found ${toolResult.count || 0} tabs matching "${activeFunctionCall.args?.query || ""}".`;
+            } else if (activeFunctionCall.name === "close_tab") {
+              note = `Closed tab ID ${activeFunctionCall.args?.tabId || "active"}.`;
+            } else if (activeFunctionCall.name === "fill_form") {
+              note = `Filled ${toolResult.fieldsFilled || 0} form fields successfully.`;
+            } else if (activeFunctionCall.name === "extract_media") {
+              note = `Extracted ${toolResult.totalMedia || 0} media assets (${toolResult.imageCount || 0} images, ${toolResult.videoCount || 0} videos, ${toolResult.docCount || 0} docs).`;
+            } else if (activeFunctionCall.name === "compare_tabs") {
+              note = `Compared Tab ${activeFunctionCall.args?.tabIdA} vs Tab ${activeFunctionCall.args?.tabIdB || "active"}.`;
+            } else if (activeFunctionCall.name === "tts_speak") {
+              note = `Spoke text aloud using browser voice synthesis.`;
+            } else if (activeFunctionCall.name === "download_markdown_report") {
+              note = `Downloaded report file: "${activeFunctionCall.args?.filename || "report.md"}".`;
+            } else if (activeFunctionCall.name === "update_plan") {
+              const count = activeFunctionCall.args?.plan?.length || 0;
+              const step = activeFunctionCall.args?.currentStepIndex || 1;
+              note = `Updated task plan: Step ${step}/${count} (${toolResult.activeGoal || "In Progress"}).`;
+            } else if (activeFunctionCall.name === "manage_scratchpad") {
+              note = `Scratchpad ${activeFunctionCall.args?.action || "updated"} [key: ${activeFunctionCall.args?.key || "default"}].`;
+            } else if (activeFunctionCall.name === "execute_custom_script") {
+              note = `Custom JS evaluated: ${toolResult.success ? "Success" : "Error"}.`;
+            } else if (activeFunctionCall.name === "wait_for_condition") {
+              note = `Condition met in ${toolResult.elapsedMs || 0}ms.`;
+            } else if (activeFunctionCall.name === "crawl_links") {
+              note = `Crawled and extracted ${toolResult.count || 0} links.`;
+            } else if (activeFunctionCall.name === "get_page_meta_seo") {
+              note = `Extracted page metadata & JSON-LD schemas (${toolResult.headingsCount || 0} headings).`;
             }
             responseDiv.textContent = note;
           }
@@ -3150,6 +3819,229 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
             textContent: "AcceleratedLogic AI Assistant active viewport element content.",
             attributes: { id: "app-container", class: "main-wrapper flex", "data-active": "true" },
             isVisible: true
+          });
+        } else if (name === "highlight_element") {
+          const sel = args.selector || "";
+          const col = args.color || "#8b5cf6";
+          const lbl = args.label || "";
+          resolve({
+            success: true,
+            selector: sel,
+            color: col,
+            label: lbl || undefined,
+            rect: { x: 50, y: 120, width: 340, height: 48 },
+            message: `[Simulator Fallback] Successfully highlighted element "${sel}" with ${col} glow in virtual viewport.`
+          });
+        } else if (name === "extract_table_data") {
+          const sel = args.selector || "";
+          resolve({
+            success: true,
+            tableCount: 1,
+            headers: ["Feature / Metric", "Standard Tier", "Pro Edition", "Enterprise Agent"],
+            rowCount: 4,
+            data: [
+              { "Feature / Metric": "Autonomous Agent Turns", "Standard Tier": "5 turns", "Pro Edition": "15 turns", "Enterprise Agent": "Unlimited" },
+              { "Feature / Metric": "DOM & Vision Analysis", "Standard Tier": "Yes", "Pro Edition": "Yes", "Enterprise Agent": "Yes" },
+              { "Feature / Metric": "Table & CSV Extraction", "Standard Tier": "Basic", "Pro Edition": "High Precision", "Enterprise Agent": "Multi-table streaming" },
+              { "Feature / Metric": "Response Speed", "Standard Tier": "Fast (1.2s)", "Pro Edition": "Ultra (0.4s)", "Enterprise Agent": "Instantaneous" }
+            ],
+            csv: `"Feature / Metric","Standard Tier","Pro Edition","Enterprise Agent"\n"Autonomous Agent Turns","5 turns","15 turns","Unlimited"\n"DOM & Vision Analysis","Yes","Yes","Yes"\n"Table & CSV Extraction","Basic","High Precision","Multi-table streaming"\n"Response Speed","Fast (1.2s)","Ultra (0.4s)","Instantaneous"`,
+            markdown: `| Feature / Metric | Standard Tier | Pro Edition | Enterprise Agent |\n| --- | --- | --- | --- |\n| Autonomous Agent Turns | 5 turns | 15 turns | Unlimited |\n| DOM & Vision Analysis | Yes | Yes | Yes |\n| Table & CSV Extraction | Basic | High Precision | Multi-table streaming |\n| Response Speed | Fast (1.2s) | Ultra (0.4s) | Instantaneous |`,
+            message: "[Simulator Fallback] Extracted 4 rows across 4 columns from simulated table."
+          });
+        } else if (name === "search_tabs") {
+          const q = (args.query || "").toLowerCase();
+          const sampleTabs = [
+            { id: 1, title: "AcceleratedLogic AI - Chrome Extension", url: "https://acceleratedlogic.ai" },
+            { id: 2, title: "Google Gemini API - Developer Documentation", url: "https://ai.google.dev/docs" },
+            { id: 3, title: "GitHub - AcceleratedLogic Extension Repository", url: "https://github.com/AcceleratedLogic" }
+          ];
+          const matched = sampleTabs.filter(t => !q || t.title.toLowerCase().includes(q) || t.url.toLowerCase().includes(q));
+          resolve({
+            success: true,
+            query: q,
+            count: matched.length,
+            tabs: matched,
+            message: `[Simulator Fallback] Found ${matched.length} tabs matching query "${q}".`
+          });
+        } else if (name === "close_tab") {
+          const tid = args.tabId || 1;
+          resolve({
+            success: true,
+            tabId: tid,
+            message: `[Simulator Fallback] Successfully closed tab ID ${tid}.`
+          });
+        } else if (name === "fill_form") {
+          const fields = args.fields || [];
+          resolve({
+            success: true,
+            fieldsFilled: fields.length,
+            submitted: !!args.submitAfter,
+            details: fields.map(f => ({ name: f.name || f.label || f.selector, status: "filled", value: f.value })),
+            message: `[Simulator Fallback] Successfully filled ${fields.length} form field${fields.length === 1 ? '' : 's'}.`
+          });
+        } else if (name === "extract_media") {
+          resolve({
+            success: true,
+            totalMedia: 6,
+            imageCount: 4,
+            videoCount: 1,
+            docCount: 1,
+            images: [
+              { src: "https://acceleratedlogic.ai/logo.png", alt: "AcceleratedLogic Logo", width: 200, height: 48 },
+              { src: "https://acceleratedlogic.ai/banner.webp", alt: "AI Browser Agent Banner", width: 1200, height: 630 },
+              { src: "https://acceleratedlogic.ai/screenshot.png", alt: "Extension In Action", width: 800, height: 600 },
+              { src: "https://acceleratedlogic.ai/avatar.jpg", alt: "User Profile", width: 96, height: 96 }
+            ],
+            videos: [
+              { src: "https://acceleratedlogic.ai/demo.mp4", type: "video/mp4", poster: "https://acceleratedlogic.ai/demo-thumb.jpg" }
+            ],
+            documents: [
+              { href: "https://acceleratedlogic.ai/docs/whitepaper.pdf", title: "Autonomous Browser Agent Whitepaper (PDF)", type: "pdf" }
+            ],
+            message: "[Simulator Fallback] Extracted 4 images, 1 video, and 1 document."
+          });
+        } else if (name === "compare_tabs") {
+          resolve({
+            success: true,
+            tabA: { id: args.tabIdA || 1, title: "AcceleratedLogic AI Pro Edition", url: "https://acceleratedlogic.ai/pro", summary: "Autonomous Chrome Extension with 15-step agent loops, DOM extraction, and CSV tables." },
+            tabB: { id: args.tabIdB || 2, title: "Google Gemini Developer API", url: "https://ai.google.dev", summary: "Gemini 2.5 Flash API docs, multimodal models, function calling & live streams." },
+            comparisonKeyPoints: [
+              "Tab 1 features Chrome extension client automation tools.",
+              "Tab 2 provides the backend AI model APIs powering the extension.",
+              "Both support multimodal image and tool execution workflows."
+            ],
+            message: `[Simulator Fallback] Successfully compared Tab ${args.tabIdA || 1} and Tab ${args.tabIdB || 2}.`
+          });
+        } else if (name === "tts_speak") {
+          const txt = args.text || "";
+          if (typeof window !== "undefined" && window.speechSynthesis) {
+            try {
+              window.speechSynthesis.cancel();
+              const utterance = new SpeechSynthesisUtterance(txt.substring(0, 300));
+              utterance.rate = args.rate || 1.0;
+              utterance.pitch = args.pitch || 1.0;
+              window.speechSynthesis.speak(utterance);
+            } catch (e) {
+              console.warn("TTS speak warning:", e);
+            }
+          }
+          resolve({
+            success: true,
+            spokenTextLength: txt.length,
+            message: `[Simulator Fallback] Spoke text (${txt.substring(0, 40)}...) aloud.`
+          });
+        } else if (name === "download_markdown_report") {
+          const filename = args.filename || "research-summary.md";
+          const content = args.markdownContent || "";
+          try {
+            const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          } catch (e) {
+            console.warn("Download error:", e);
+          }
+          resolve({
+            success: true,
+            filename: filename,
+            bytes: content.length,
+            message: `[Simulator Fallback] Downloaded Markdown report file "${filename}".`
+          });
+        } else if (name === "update_plan") {
+          const plan = args.plan || [];
+          const currIdx = args.currentStepIndex || 1;
+          const activeStep = plan.find(p => p.step === currIdx) || plan[0];
+          resolve({
+            success: true,
+            totalSteps: plan.length,
+            currentStep: currIdx,
+            activeGoal: activeStep?.goal || "In Progress",
+            activeStatus: activeStep?.status || "in_progress",
+            message: `[Simulator Fallback] Updated long-horizon plan: Step ${currIdx}/${plan.length} (${activeStep?.goal || "Milestone"}).`
+          });
+        } else if (name === "manage_scratchpad") {
+          const act = args.action || "read";
+          const key = args.key || "default";
+          const content = args.content || "";
+          resolve({
+            success: true,
+            action: act,
+            key: key,
+            storedLength: content.length,
+            content: content || "AcceleratedLogic Agent Scratchpad: Stored intermediate facts, verified citations, and tabular data.",
+            message: `[Simulator Fallback] Successfully performed scratchpad action "${act}" on key "${key}".`
+          });
+        } else if (name === "execute_custom_script") {
+          const code = args.code || "";
+          let evalResult = "Script evaluated successfully.";
+          try {
+            if (code.includes("querySelectorAll")) {
+              evalResult = ["Feature Overview", "Autonomous Agent Architecture", "API Integration Docs", "Pricing Breakdown"];
+            } else {
+              evalResult = { executed: true, timestamp: Date.now(), returnVal: "OK" };
+            }
+          } catch (e) {
+            evalResult = { error: String(e) };
+          }
+          resolve({
+            success: true,
+            result: evalResult,
+            message: `[Simulator Fallback] Executed custom script safely in sandbox.`
+          });
+        } else if (name === "wait_for_condition") {
+          const timeout = Math.min(Number(args.timeoutMs) || 1000, 4000);
+          setTimeout(() => {
+            resolve({
+              success: true,
+              conditionMet: true,
+              selector: args.selector,
+              textIncludes: args.textIncludes,
+              elapsedMs: timeout,
+              message: `[Simulator Fallback] Condition met after ${timeout}ms.`
+            });
+          }, Math.min(timeout, 300));
+        } else if (name === "crawl_links") {
+          resolve({
+            success: true,
+            count: 5,
+            links: [
+              { url: "https://acceleratedlogic.ai/docs/agent-loop", title: "Autonomous Agent Multi-Step Loop Architecture", anchorText: "Learn about Agent Loops" },
+              { url: "https://acceleratedlogic.ai/docs/tools-api", title: "Comprehensive Chrome Extension Tools Reference", anchorText: "Tools API Reference" },
+              { url: "https://acceleratedlogic.ai/docs/gemini-2-5", title: "Gemini 2.5 Flash & Multimodal Vision Integration", anchorText: "Gemini 2.5 Setup" },
+              { url: "https://acceleratedlogic.ai/docs/scratchpad", title: "Long-Horizon Working Memory & Scratchpad Design", anchorText: "Scratchpad Docs" },
+              { url: "https://acceleratedlogic.ai/pricing", title: "AcceleratedLogic Pro Tier & Cloud Options", anchorText: "View Pricing Tiers" }
+            ],
+            message: `[Simulator Fallback] Crawled 5 outbound and documentation links.`
+          });
+        } else if (name === "get_page_meta_seo") {
+          resolve({
+            success: true,
+            title: "AcceleratedLogic AI — Autonomous Multi-Step Chrome Extension",
+            description: "High-performance autonomous browser agent Chrome extension with 30-step agent loops, DOM extraction, and CSV synthesis.",
+            canonical: "https://acceleratedlogic.ai",
+            og: {
+              "og:title": "AcceleratedLogic AI Extension",
+              "og:description": "Autonomous Chrome Browser Extension with Deep Multi-Step Research",
+              "og:image": "https://acceleratedlogic.ai/og-banner.png"
+            },
+            headingsCount: 6,
+            headingsOutline: [
+              { level: "h1", text: "AcceleratedLogic AI Platform" },
+              { level: "h2", text: "Autonomous Agent Multi-Turn Reasoning" },
+              { level: "h2", text: "Multimodal Vision & DOM Grounding" },
+              { level: "h3", text: "Native Tool Declarations" },
+              { level: "h3", text: "Security & Sandbox Compliance" },
+              { level: "h2", text: "Get Started in Chrome" }
+            ],
+            jsonLdCount: 1,
+            jsonLd: [{ "@context": "https://schema.org", "@type": "SoftwareApplication", "name": "AcceleratedLogic AI" }],
+            message: `[Simulator Fallback] Extracted page SEO metadata, OG tags, and 6 outline headings.`
           });
         } else {
           resolve({ error: "Unknown tool" });
@@ -4634,6 +5526,632 @@ ${isVisionCapable ? "- If you call 'get_page_screenshot', you will receive the s
               resolve(results[0].result);
             } else {
               resolve({ success: false, error: "Failed to inspect element." });
+            }
+          });
+        } else if (name === "highlight_element") {
+          const selector = args.selector || "";
+          const color = args.color || "#8b5cf6";
+          const duration = args.durationMs !== undefined ? Number(args.durationMs) : 4000;
+          const label = args.label || "";
+          const scrollIntoView = args.scrollIntoView !== false;
+
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            args: [selector, color, duration, label, scrollIntoView],
+            func: (sel, hlColor, dur, lbl, autoScroll) => {
+              try {
+                const el = document.querySelector(sel);
+                if (!el) return { success: false, error: `Element matching selector "${sel}" not found.` };
+
+                if (autoScroll) {
+                  el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+                }
+
+                const rect = el.getBoundingClientRect();
+                const overlay = document.createElement("div");
+                overlay.className = "accelerated-logic-highlight-overlay";
+                overlay.style.position = "fixed";
+                overlay.style.left = `${Math.max(0, rect.left - 4)}px`;
+                overlay.style.top = `${Math.max(0, rect.top - 4)}px`;
+                overlay.style.width = `${rect.width + 8}px`;
+                overlay.style.height = `${rect.height + 8}px`;
+                overlay.style.border = `3px solid ${hlColor}`;
+                overlay.style.borderRadius = "8px";
+                overlay.style.boxShadow = `0 0 20px ${hlColor}, inset 0 0 10px ${hlColor}33`;
+                overlay.style.backgroundColor = `${hlColor}18`;
+                overlay.style.pointerEvents = "none";
+                overlay.style.zIndex = "2147483646";
+                overlay.style.transition = "all 0.3s ease";
+                overlay.style.boxSizing = "border-box";
+
+                if (lbl) {
+                  const badge = document.createElement("div");
+                  badge.style.position = "absolute";
+                  badge.style.top = "-26px";
+                  badge.style.left = "0";
+                  badge.style.backgroundColor = hlColor;
+                  badge.style.color = "#ffffff";
+                  badge.style.fontSize = "11px";
+                  badge.style.fontWeight = "600";
+                  badge.style.fontFamily = "system-ui, sans-serif";
+                  badge.style.padding = "2px 8px";
+                  badge.style.borderRadius = "4px";
+                  badge.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
+                  badge.style.whiteSpace = "nowrap";
+                  badge.textContent = lbl;
+                  overlay.appendChild(badge);
+                }
+
+                document.body.appendChild(overlay);
+
+                if (dur > 0) {
+                  setTimeout(() => {
+                    overlay.style.opacity = "0";
+                    setTimeout(() => overlay.remove(), 400);
+                  }, dur);
+                }
+
+                return {
+                  success: true,
+                  tagName: el.tagName,
+                  id: el.id,
+                  selector: sel,
+                  label: lbl || undefined,
+                  rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+                  message: `Successfully highlighted element <${el.tagName.toLowerCase()}> with ${hlColor} border.`
+                };
+              } catch (e) {
+                return { success: false, error: e.message };
+              }
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve(results[0].result);
+            } else {
+              resolve({ success: false, error: "Failed to highlight element on tab." });
+            }
+          });
+        } else if (name === "extract_table_data") {
+          const selector = args.selector || "";
+          const format = args.format || "json";
+          const maxRows = Number(args.maxRows) || 100;
+
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            args: [selector, format, maxRows],
+            func: (sel, outFormat, maxR) => {
+              try {
+                let tables = [];
+                if (sel) {
+                  const custom = document.querySelectorAll(sel);
+                  if (custom.length > 0) tables = Array.from(custom);
+                }
+                if (tables.length === 0) {
+                  tables = Array.from(document.querySelectorAll("table, [role='table'], [role='grid']"));
+                }
+
+                if (tables.length === 0) {
+                  return {
+                    success: false,
+                    error: "No table or grid elements found on the page."
+                  };
+                }
+
+                const extractedTables = [];
+
+                tables.forEach((table, tIndex) => {
+                  const headers = [];
+                  const rows = [];
+
+                  // 1. Extract Headers
+                  const headerEls = table.querySelectorAll("thead th, tr:first-child th, thead td, [role='columnheader']");
+                  if (headerEls.length > 0) {
+                    headerEls.forEach(th => {
+                      const txt = (th.innerText || th.textContent || "").trim().replace(/\s+/g, ' ');
+                      headers.push(txt || `Column ${headers.length + 1}`);
+                    });
+                  }
+
+                  // 2. Extract Data Rows
+                  const rowEls = table.querySelectorAll("tbody tr, tr:not(:first-child), [role='row']");
+                  const targetRowEls = rowEls.length > 0 ? Array.from(rowEls) : Array.from(table.querySelectorAll("tr"));
+
+                  targetRowEls.slice(0, maxR).forEach((tr) => {
+                    const cells = Array.from(tr.querySelectorAll("td, th, [role='cell'], [role='gridcell']"));
+                    if (cells.length === 0) return;
+
+                    const rowObj = {};
+                    const rowArr = [];
+
+                    cells.forEach((td, cIdx) => {
+                      const val = (td.innerText || td.textContent || "").trim().replace(/\s+/g, ' ');
+                      const colName = headers[cIdx] || `Col_${cIdx + 1}`;
+                      rowObj[colName] = val;
+                      rowArr.push(val);
+                    });
+
+                    if (headers.length === 0 && rowArr.length > 0) {
+                      rowArr.forEach((_, idx) => headers.push(`Col_${idx + 1}`));
+                    }
+
+                    rows.push(rowObj);
+                  });
+
+                  let csvStr = "";
+                  if (headers.length > 0) {
+                    csvStr += headers.map(h => `"${(h || '').replace(/"/g, '""')}"`).join(",") + "\n";
+                    rows.forEach(r => {
+                      csvStr += headers.map(h => `"${(r[h] || '').replace(/"/g, '""')}"`).join(",") + "\n";
+                    });
+                  }
+
+                  let mdStr = "";
+                  if (headers.length > 0) {
+                    mdStr += "| " + headers.join(" | ") + " |\n";
+                    mdStr += "| " + headers.map(() => "---").join(" | ") + " |\n";
+                    rows.forEach(r => {
+                      mdStr += "| " + headers.map(h => (r[h] || '').replace(/\|/g, '\\|')).join(" | ") + " |\n";
+                    });
+                  }
+
+                  extractedTables.push({
+                    tableIndex: tIndex + 1,
+                    headers,
+                    rowCount: rows.length,
+                    data: rows,
+                    csv: csvStr,
+                    markdown: mdStr
+                  });
+                });
+
+                const primary = extractedTables[0];
+                return {
+                  success: true,
+                  tableCount: extractedTables.length,
+                  headers: primary.headers,
+                  rowCount: primary.rowCount,
+                  data: primary.data,
+                  csv: primary.csv,
+                  markdown: primary.markdown,
+                  allTables: extractedTables.length > 1 ? extractedTables : undefined,
+                  message: `Successfully extracted ${primary.rowCount} rows across ${primary.headers.length} columns.`
+                };
+              } catch (e) {
+                return { success: false, error: e.message };
+              }
+            }
+          }, (results) => {
+            if (results && results[0] && results[0].result) {
+              resolve(results[0].result);
+            } else {
+              resolve({ success: false, error: "Failed to extract table data from tab." });
+            }
+          });
+        } else if (name === "search_tabs") {
+          const query = (args.query || "").toLowerCase().trim();
+          chrome.tabs.query({}, (tabs) => {
+            if (!tabs) {
+              resolve({ success: false, error: "Failed to query tabs." });
+              return;
+            }
+            const matches = tabs.filter(t => {
+              if (!query) return true;
+              const title = (t.title || "").toLowerCase();
+              const url = (t.url || "").toLowerCase();
+              return title.includes(query) || url.includes(query);
+            }).map(t => ({
+              id: t.id,
+              title: t.title,
+              url: t.url,
+              active: t.active,
+              windowId: t.windowId
+            }));
+
+            resolve({
+              success: true,
+              query: query,
+              count: matches.length,
+              tabs: matches,
+              message: `Found ${matches.length} matching tab${matches.length === 1 ? '' : 's'}.`
+            });
+          });
+        } else if (name === "close_tab") {
+          const tabIdToClose = args.tabId !== undefined ? Number(args.tabId) : activeTab.id;
+          chrome.tabs.remove(tabIdToClose, () => {
+            resolve({
+              success: true,
+              tabId: tabIdToClose,
+              message: `Tab ID ${tabIdToClose} successfully closed.`
+            });
+          });
+        } else if (name === "fill_form") {
+          const fields = args.fields || [];
+          const submitAfter = !!args.submitAfter;
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            func: (fieldsToFill, autoSubmit) => {
+              const results = [];
+              let filledCount = 0;
+
+              fieldsToFill.forEach((field) => {
+                let el = null;
+                if (field.selector) {
+                  try { el = document.querySelector(field.selector); } catch (e) {}
+                }
+                if (!el && field.name) {
+                  el = document.querySelector(`[name="${field.name}"], #${field.name}`);
+                }
+                if (!el && field.label) {
+                  const lbl = field.label.toLowerCase();
+                  // Try placeholder or aria-label
+                  el = document.querySelector(`input[placeholder*="${field.label}" i], textarea[placeholder*="${field.label}" i], [aria-label*="${field.label}" i]`);
+                  if (!el) {
+                    const labelEls = Array.from(document.querySelectorAll('label'));
+                    const matchingLabel = labelEls.find(l => (l.innerText || '').toLowerCase().includes(lbl));
+                    if (matchingLabel) {
+                      if (matchingLabel.htmlFor) {
+                        el = document.getElementById(matchingLabel.htmlFor);
+                      }
+                      if (!el) {
+                        el = matchingLabel.querySelector('input, textarea, select');
+                      }
+                    }
+                  }
+                }
+
+                if (!el) {
+                  results.push({ field: field.name || field.label || field.selector, status: "not_found" });
+                  return;
+                }
+
+                const tag = el.tagName.toLowerCase();
+                const type = (el.getAttribute('type') || '').toLowerCase();
+
+                if (type === 'checkbox' || type === 'radio') {
+                  const isCheck = field.value === true || field.value === 'true' || field.value === '1';
+                  el.checked = isCheck;
+                } else if (tag === 'select') {
+                  el.value = String(field.value);
+                } else {
+                  el.value = String(field.value);
+                }
+
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+                filledCount++;
+                results.push({ field: field.name || field.label || field.selector, status: "filled", value: field.value });
+              });
+
+              let submitted = false;
+              if (autoSubmit) {
+                const submitBtn = document.querySelector('button[type="submit"], input[type="submit"], button.btn-primary');
+                if (submitBtn) {
+                  submitBtn.click();
+                  submitted = true;
+                }
+              }
+
+              return {
+                success: true,
+                fieldsFilled: filledCount,
+                submitted: submitted,
+                details: results
+              };
+            },
+            args: [fields, submitAfter]
+          }, (res) => {
+            if (res && res[0] && res[0].result) {
+              resolve(res[0].result);
+            } else {
+              resolve({ success: false, error: "Failed to fill form fields." });
+            }
+          });
+        } else if (name === "extract_media") {
+          const mediaType = args.type || "all";
+          const minDim = args.minDimensions !== undefined ? Number(args.minDimensions) : 50;
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            func: (targetType, minSize) => {
+              const images = Array.from(document.querySelectorAll('img')).filter(img => {
+                const w = img.naturalWidth || img.width || 0;
+                const h = img.naturalHeight || img.height || 0;
+                return (w >= minSize && h >= minSize) || (img.src && !img.src.startsWith('data:image/svg'));
+              }).slice(0, 50).map(img => ({
+                src: img.src,
+                alt: img.alt || '',
+                width: img.naturalWidth || img.width || 0,
+                height: img.naturalHeight || img.height || 0
+              }));
+
+              const videos = Array.from(document.querySelectorAll('video, iframe[src*="youtube"], iframe[src*="vimeo"]')).slice(0, 20).map(v => ({
+                src: v.src || v.querySelector('source')?.src || '',
+                poster: v.poster || ''
+              }));
+
+              const docLinks = Array.from(document.querySelectorAll('a[href$=".pdf"], a[href$=".zip"], a[href$=".docx"], a[href$=".xlsx"], a[href$=".csv"]')).slice(0, 30).map(a => ({
+                href: a.href,
+                text: (a.innerText || a.textContent || '').trim()
+              }));
+
+              return {
+                success: true,
+                totalMedia: images.length + videos.length + docLinks.length,
+                imageCount: images.length,
+                videoCount: videos.length,
+                docCount: docLinks.length,
+                images: targetType === 'all' || targetType === 'images' ? images : [],
+                videos: targetType === 'all' || targetType === 'videos' ? videos : [],
+                documents: targetType === 'all' || targetType === 'documents' ? docLinks : []
+              };
+            },
+            args: [mediaType, minDim]
+          }, (res) => {
+            if (res && res[0] && res[0].result) {
+              resolve(res[0].result);
+            } else {
+              resolve({ success: false, error: "Failed to extract media." });
+            }
+          });
+        } else if (name === "compare_tabs") {
+          const tabIdA = Number(args.tabIdA);
+          const tabIdB = args.tabIdB !== undefined ? Number(args.tabIdB) : activeTab.id;
+
+          chrome.tabs.get(tabIdA, (tabA) => {
+            chrome.tabs.get(tabIdB, (tabB) => {
+              resolve({
+                success: true,
+                tabA: { id: tabA?.id, title: tabA?.title, url: tabA?.url },
+                tabB: { id: tabB?.id, title: tabB?.title, url: tabB?.url },
+                message: `Successfully retrieved metadata for Tab ${tabIdA} and Tab ${tabIdB}.`
+              });
+            });
+          });
+        } else if (name === "tts_speak") {
+          const txt = args.text || "";
+          if (typeof window !== "undefined" && window.speechSynthesis) {
+            try {
+              window.speechSynthesis.cancel();
+              const utterance = new SpeechSynthesisUtterance(txt.substring(0, 400));
+              utterance.rate = args.rate || 1.0;
+              utterance.pitch = args.pitch || 1.0;
+              window.speechSynthesis.speak(utterance);
+            } catch (e) {
+              console.warn("TTS speak warning:", e);
+            }
+          }
+          resolve({
+            success: true,
+            spokenLength: txt.length,
+            message: "Spoke text aloud."
+          });
+        } else if (name === "download_markdown_report") {
+          const filename = args.filename || "research-summary.md";
+          const content = args.markdownContent || "";
+          try {
+            const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          } catch (e) {
+            console.warn("Download error:", e);
+          }
+          resolve({
+            success: true,
+            filename: filename,
+            bytes: content.length,
+            message: `Downloaded Markdown report file "${filename}".`
+          });
+        } else if (name === "update_plan") {
+          const plan = args.plan || [];
+          const currIdx = args.currentStepIndex || 1;
+          const activeStep = plan.find(p => p.step === currIdx) || plan[0];
+          resolve({
+            success: true,
+            totalSteps: plan.length,
+            currentStep: currIdx,
+            activeGoal: activeStep?.goal || "In Progress",
+            activeStatus: activeStep?.status || "in_progress",
+            message: `Updated task plan: Step ${currIdx}/${plan.length} (${activeStep?.goal || "Milestone"}).`
+          });
+        } else if (name === "manage_scratchpad") {
+          const act = args.action || "read";
+          const key = args.key || "default";
+          const content = args.content || "";
+          
+          if (!window._agentScratchpad) {
+            window._agentScratchpad = {};
+          }
+          
+          if (act === "write") {
+            window._agentScratchpad[key] = content;
+          } else if (act === "append") {
+            window._agentScratchpad[key] = (window._agentScratchpad[key] ? window._agentScratchpad[key] + "\n" : "") + content;
+          } else if (act === "clear") {
+            delete window._agentScratchpad[key];
+          }
+          
+          resolve({
+            success: true,
+            action: act,
+            key: key,
+            currentValue: window._agentScratchpad[key] || "",
+            allKeys: Object.keys(window._agentScratchpad),
+            message: `Successfully performed scratchpad action "${act}" on key "${key}".`
+          });
+        } else if (name === "execute_custom_script") {
+          const code = args.code || "";
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            func: (scriptCode) => {
+              try {
+                const fn = new Function(scriptCode);
+                const res = fn();
+                return { success: true, result: res };
+              } catch (e) {
+                return { success: false, error: e.toString() };
+              }
+            },
+            args: [code]
+          }, (res) => {
+            if (res && res[0] && res[0].result) {
+              resolve(res[0].result);
+            } else {
+              resolve({ success: false, error: "Failed to evaluate script." });
+            }
+          });
+        } else if (name === "wait_for_condition") {
+          const sel = args.selector || "";
+          const txt = args.textIncludes || "";
+          const timeout = Math.min(Number(args.timeoutMs) || 3000, 10000);
+
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            func: (targetSelector, targetText, maxWait) => {
+              return new Promise((resolveWait) => {
+                const start = performance.now();
+                const check = () => {
+                  let satisfied = false;
+                  if (targetSelector) {
+                    try {
+                      if (document.querySelector(targetSelector)) satisfied = true;
+                    } catch (e) {}
+                  }
+                  if (targetText && !satisfied) {
+                    if ((document.body?.innerText || '').toLowerCase().includes(targetText.toLowerCase())) {
+                      satisfied = true;
+                    }
+                  }
+                  if (!targetSelector && !targetText) {
+                    satisfied = true;
+                  }
+
+                  const elapsed = performance.now() - start;
+                  if (satisfied || elapsed >= maxWait) {
+                    resolveWait({
+                      success: true,
+                      conditionMet: satisfied,
+                      elapsedMs: Math.round(elapsed),
+                      timedOut: !satisfied && elapsed >= maxWait
+                    });
+                  } else {
+                    setTimeout(check, 100);
+                  }
+                };
+                check();
+              });
+            },
+            args: [sel, txt, timeout]
+          }, (res) => {
+            if (res && res[0] && res[0].result) {
+              resolve(res[0].result);
+            } else {
+              resolve({ success: true, conditionMet: true, elapsedMs: 50 });
+            }
+          });
+        } else if (name === "crawl_links") {
+          const sel = args.selector || "a[href]";
+          const keyword = (args.keywordFilter || "").toLowerCase();
+          const limit = Math.min(Number(args.limit) || 20, 50);
+
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            func: (targetSelector, filterKw, maxCount) => {
+              const anchors = Array.from(document.querySelectorAll(targetSelector));
+              const results = [];
+              const seen = new Set();
+
+              for (const a of anchors) {
+                const href = a.href;
+                const text = (a.innerText || a.textContent || "").trim();
+                if (!href || href.startsWith("javascript:") || href.startsWith("#") || seen.has(href)) {
+                  continue;
+                }
+
+                if (filterKw) {
+                  if (!href.toLowerCase().includes(filterKw) && !text.toLowerCase().includes(filterKw)) {
+                    continue;
+                  }
+                }
+
+                seen.add(href);
+                results.push({
+                  url: href,
+                  anchorText: text || "Untitled Link",
+                  title: a.getAttribute("title") || ""
+                });
+
+                if (results.length >= maxCount) break;
+              }
+
+              return {
+                success: true,
+                count: results.length,
+                links: results
+              };
+            },
+            args: [sel, keyword, limit]
+          }, (res) => {
+            if (res && res[0] && res[0].result) {
+              resolve(res[0].result);
+            } else {
+              resolve({ success: false, error: "Failed to extract crawl links." });
+            }
+          });
+        } else if (name === "get_page_meta_seo") {
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            func: () => {
+              const getMeta = (name) => {
+                const el = document.querySelector(`meta[name="${name}" i], meta[property="${name}" i]`);
+                return el ? el.getAttribute('content') : '';
+              };
+
+              const og = {};
+              document.querySelectorAll('meta[property^="og:"], meta[name^="og:"]').forEach(m => {
+                const p = m.getAttribute('property') || m.getAttribute('name');
+                if (p) og[p] = m.getAttribute('content') || '';
+              });
+
+              const headings = [];
+              document.querySelectorAll('h1, h2, h3, h4').forEach(h => {
+                const txt = (h.innerText || '').trim();
+                if (txt) {
+                  headings.push({ level: h.tagName.toLowerCase(), text: txt.substring(0, 120) });
+                }
+              });
+
+              const jsonLd = [];
+              document.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
+                try {
+                  jsonLd.push(JSON.parse(s.textContent || '{}'));
+                } catch (e) {}
+              });
+
+              return {
+                success: true,
+                title: document.title,
+                description: getMeta('description'),
+                canonical: document.querySelector('link[rel="canonical"]')?.getAttribute('href') || window.location.href,
+                keywords: getMeta('keywords'),
+                author: getMeta('author'),
+                og: og,
+                headingsCount: headings.length,
+                headingsOutline: headings.slice(0, 30),
+                jsonLdCount: jsonLd.length,
+                jsonLd: jsonLd
+              };
+            }
+          }, (res) => {
+            if (res && res[0] && res[0].result) {
+              resolve(res[0].result);
+            } else {
+              resolve({ success: false, error: "Failed to extract SEO metadata." });
             }
           });
         } else {
